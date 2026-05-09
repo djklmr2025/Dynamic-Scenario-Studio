@@ -1,0 +1,26 @@
+{
+  "entities": {
+    "Scenario": {
+      "title": "User Scenario",
+      "description": "A creative 4D scenario containing layers and ambient metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "aspectRatio": { "type": "string", "enum": ["4:3", "16:9", "16:10"] },
+        "modules": { "type": "array" },
+        "backgroundColor": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "userId", "name", "modules"]
+    }
+  },
+  "firestore": {
+    "scenarios/{scenarioId}": {
+      "schema": "Scenario",
+      "description": "Collection of user-created scenarios"
+    }
+  }
+}

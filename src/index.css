@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --color-indigo-500: #6366f1;
+  --color-slate-200: #e2e8f0;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-800: #1e293b;
+}
+
+@layer base {
+  body {
+    @apply bg-[#020617] text-slate-200;
+  }
+}
+
+.frosted-glass {
+  @apply bg-white/5 backdrop-blur-md border border-white/10;
+}
+
+.mesh-gradient {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.mesh-ball-1 {
+  @apply absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-900/30 blur-[120px] rounded-full;
+}
+
+.mesh-ball-2 {
+  @apply absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-blue-900/20 blur-[150px] rounded-full;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+}
+
+.theme-applied-ai {
+  --accent-primary: #10b981;
+}
+.theme-applied-ai body { background: #f8fafc; color: #0f172a; }
+.theme-applied-ai .mesh-gradient { display: none; }
+.theme-applied-ai header { background: #ffffff; border-bottom-color: #e2e8f0; }
+
+.theme-4d-db {
+  --accent-primary: #64748b;
+}
+.theme-4d-db body { background: #0f172a; }
+.theme-4d-db .mesh-gradient { filter: saturate(0) contrast(1.2); }
+
+.theme-screenmatch {
+  --accent-primary: #dc2626;
+}
+.theme-screenmatch body { background: #000; }
+.theme-screenmatch header { background: rgba(0,0,0,0.8); border-bottom-color: #dc262644; }
+
+.theme-cat-4d {
+  --accent-primary: #84cc16;
+}
+
+.theme-sansar-vr {
+  --accent-primary: #f97316;
+}
+
+@keyframes blinking-cursor {
+  from, to { opacity: 1; }
+  50% { opacity: 0; }
+}
+.blinking-cursor::after {
+  content: '_';
+  animation: blinking-cursor 1s step-end infinite;
+}
