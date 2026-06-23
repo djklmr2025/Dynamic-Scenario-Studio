@@ -223,3 +223,31 @@ export async function generateTimeline(prompt: string, currentScenario: Scenario
     throw new Error("Failed to generate timeline");
   }
 }
+
+export async function generateOptimizedPrompt(userPrompt: string, category: 'background' | 'character' | 'item'): Promise<string> {
+  if (!apiKey) {
+    throw new Error("API Key de Gemini no configurada.");
+  }
+
+  const promptText = `You are an ultimate Anime/Manga Art Director. 
+  Your job is to translate the user's brief description or concept into a detailed, professional, and visually rich anime prompt optimized for image generation models (like Stable Diffusion, Midjourney, or DALL-E) to produce optimal anime assets.
+
+  The user wants an asset of type: ${category}.
+  User Request: "${userPrompt}"
+
+  Requirements for the prompt:
+  1. For 'background': Describe epic anime wallpaper details, focus on scenery, atmospheric lighting (sunset, cinematic rays), depth, standard empty or structured spaces, Ghibli, Makoto Shinkai or CoMix Wave style. Keep it clear of main character details if they just want a background scenery.
+  2. For 'character': Must emphasize "isolated on a clean, solid white background" or "solid color translucent background for easy png extraction" or explicitly requests alpha transparency keywords. Mention dynamic poses, beautiful anime lineart, clean colors.
+  3. For 'item': Describe objects, assets, or props on solid white backgrounds. Beautiful materials, detailed textures, clean vector-like outline.
+  4. Format the output to be a cohesive comma-separated string of descriptive visual tags and styles in English, which is the native language of image models.
+
+  Return ONLY the optimized english prompt text itself as a direct string response. No markdown formatting, no JSON, no quotes around the response, just the final prompt string.`;
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3.5-flash",
+    contents: [{ role: "user", parts: [{ text: promptText }] }]
+  });
+
+  return response.text?.trim() || userPrompt;
+}
+

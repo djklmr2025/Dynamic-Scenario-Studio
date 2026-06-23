@@ -35,17 +35,25 @@ import {
   LogOut,
   Infinity,
   MousePointer2,
-  Github
+  Github,
+  BookOpen,
+  Upload,
+  FileDown,
+  Key,
+  Globe,
+  ChevronDown,
+  Info
 } from 'lucide-react';
 
 import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
 
 import JSZip from 'jszip';
 import { useScenario } from './hooks/useScenario';
 import { ModuleItem } from './components/ModuleItem';
 import { Timeline } from './components/Timeline';
 import { ProductionSuite } from './components/ProductionSuite';
-import { generateScenario, generateTimeline } from './services/geminiService';
+import { generateScenario, generateTimeline, generateOptimizedPrompt } from './services/geminiService';
 import { AspectRatio, ModuleType, Module, Scene, TransitionStyle, Scenario, ModelEngine } from './types';
 import { auth, googleProvider } from './lib/firebase';
 import { signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
@@ -90,9 +98,15 @@ export default function App() {
   } = useScenario();
 
   const [aiPrompt, setAiPrompt] = useState('');
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [isConnectingWallet, setIsConnectingWallet] = useState(false);
+  const [walletError, setWalletError] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState(0);
   const [currentThought, setCurrentThought] = useState('');
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [pdfProgress, setPdfProgress] = useState('');
+  const assetUploadInputRef = useRef<HTMLInputElement>(null);
   const [memoryLog, setMemoryLog] = useState<{ id: string; text: string; time: string }[]>([
     { id: 'start', text: 'SISTEMA_VEO_V4.2.1: Conciencia activa. Esperando coordenadas creativas para orquestar la realidad...', time: new Date().toLocaleTimeString() }
   ]);
@@ -198,9 +212,269 @@ export default function App() {
     }
   }, [isGenerating]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [sidebarTab, setSidebarTab] = useState<'layers' | 'assets'>('layers');
+  const [sidebarTab, setSidebarTab] = useState<'layers' | 'assets' | 'ai_config'>('layers');
+  const [activeFaq, setActiveFaq] = useState<number | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Custom Image & AI configs saved in localStorage
+  const [animeImgEndpoint, setAnimeImgEndpoint] = useState(() => localStorage.getItem('manga_img_endpoint') || 'https://api.stability.ai/v2beta/stable-image/generate/core');
+  const [animeImgApiKey, setAnimeImgApiKey] = useState(() => localStorage.getItem('manga_img_api_key') || '');
+  const [animeFetchKey, setAnimeFetchKey] = useState(() => localStorage.getItem('manga_img_fetch_key') || '');
+  const [animeWebhook, setAnimeWebhook] = useState(() => localStorage.getItem('manga_img_webhook') || '');
+
+  // Manga prompt optimization and external generation states
+  const [animePromptText, setAnimePromptText] = useState('Un salon de clases japones abandonado por la tarde, luz de atardecer filtrandose por las ventanas, estilo makoto shinkai');
+  const [animeCategory, setAnimeCategory] = useState<'background' | 'character' | 'item'>('background');
+  const [optimizedPrompt, setOptimizedPrompt] = useState('');
+  const [isOptimizingPrompt, setIsOptimizingPrompt] = useState(false);
+  const [isGeneratingExternal, setIsGeneratingExternal] = useState(false);
+  const [isTriggeringWebhook, setIsTriggeringWebhook] = useState(false);
+
+  // Persist configurations
+  useEffect(() => {
+    localStorage.setItem('manga_img_endpoint', animeImgEndpoint);
+  }, [animeImgEndpoint]);
+
+  useEffect(() => {
+    localStorage.setItem('manga_img_api_key', animeImgApiKey);
+  }, [animeImgApiKey]);
+
+  useEffect(() => {
+    localStorage.setItem('manga_img_fetch_key', animeFetchKey);
+  }, [animeFetchKey]);
+
+  useEffect(() => {
+    localStorage.setItem('manga_img_webhook', animeWebhook);
+  }, [animeWebhook]);
+
+  const handleOptimizePrompt = async () => {
+    if (!animePromptText.trim()) return;
+    setIsOptimizingPrompt(true);
+    setMemoryLog(prev => [{ 
+      id: Date.now().toString(), 
+      text: `[IA_GEMINI] Optimizando prompt para el generador de anime...`, 
+      time: new Date().toLocaleTimeString() 
+    }, ...prev]);
+
+    try {
+      const result = await generateOptimizedPrompt(animePromptText, animeCategory);
+      setOptimizedPrompt(result);
+      setMemoryLog(prev => [{ 
+        id: Date.now().toString(), 
+        text: `[IA_GEMINI] Prompt optimizado con éxito: "${result.slice(0, 60)}..."`, 
+        time: new Date().toLocaleTimeString() 
+      }, ...prev]);
+    } catch (e: any) {
+      console.error(e);
+      setMemoryLog(prev => [{ 
+        id: Date.now().toString(), 
+        text: `[IA_ERROR] No se pudo optimizar el prompt: ${e.message || e}`, 
+        time: new Date().toLocaleTimeString() 
+      }, ...prev]);
+    } finally {
+      setIsOptimizingPrompt(false);
+    }
+  };
+
+  const handleGenerateExternalImage = async () => {
+    const promptToUse = optimizedPrompt || animePromptText;
+    setIsGeneratingExternal(true);
+    setMemoryLog(prev => [{ 
+      id: Date.now().toString(), 
+      text: `[EXTERNAL_AI] Iniciando generación de imagen de anime...`, 
+      time: new Date().toLocaleTimeString() 
+    }, ...prev]);
+
+    try {
+      if (animeImgApiKey && animeImgEndpoint) {
+        // Prepare API call depending on the provider (Stability, custom, etc)
+        const isStability = animeImgEndpoint.includes('stability.ai');
+        const headers: any = {
+          'Authorization': `Bearer ${animeImgApiKey}`,
+        };
+
+        let body: any;
+        if (isStability) {
+          const formData = new FormData();
+          formData.append('prompt', promptToUse);
+          formData.append('output_format', 'png');
+          if (animeCategory === 'background') {
+            formData.append('aspect_ratio', scenario.aspectRatio === '16:9' ? '16:9' : '4:3');
+          }
+          body = formData;
+        } else {
+          headers['Content-Type'] = 'application/json';
+          body = JSON.stringify({
+            prompt: promptToUse,
+            negative_prompt: 'lowres, bad anatomy, text, watermark',
+            steps: 25,
+            width: scenario.aspectRatio === '16:9' ? 1024 : 768,
+            height: scenario.aspectRatio === '16:9' ? 576 : 768,
+          });
+        }
+
+        const res = await fetch(animeImgEndpoint, {
+          method: 'POST',
+          headers,
+          body,
+        });
+
+        if (!res.ok) {
+          const errorMsg = await res.text();
+          throw new Error(`API error (${res.status}): ${errorMsg.slice(0, 150)}`);
+        }
+
+        const contentType = res.headers.get('content-type');
+        let imageUrl = '';
+
+        if (contentType && contentType.includes('application/json')) {
+          const json = await res.json();
+          imageUrl = json.images?.[0] || json.output?.[0] || json.url || json.image;
+          if (imageUrl && !imageUrl.startsWith('data:') && !imageUrl.startsWith('http')) {
+            imageUrl = `data:image/png;base64,${imageUrl}`;
+          }
+        } else {
+          const blob = await res.blob();
+          imageUrl = URL.createObjectURL(blob);
+        }
+
+        if (!imageUrl) {
+          throw new Error("No image data returned from generator endpoint.");
+        }
+
+        // Add to external assets list and canvas automatically
+        const assetName = `${animeCategory}_${Date.now().toString().slice(-4)}`;
+        setExternalAssets(prev => [{ name: assetName, url: imageUrl }, ...prev]);
+        addModule({
+          type: 'image',
+          title: assetName,
+          content: imageUrl,
+          x: animeCategory === 'background' ? 0 : 25,
+          y: animeCategory === 'background' ? 0 : 25,
+          width: animeCategory === 'background' ? 100 : 50,
+          height: animeCategory === 'background' ? 100 : 50,
+          isLocked: animeCategory === 'background',
+          zIndex: animeCategory === 'background' ? 1 : 12,
+          style: {
+            borderRadius: 0,
+            backgroundColor: 'transparent',
+            opacity: 1,
+            borderWidth: 0,
+            borderColor: 'transparent',
+            parallax: animeCategory === 'background' ? 0.1 : 0.4
+          }
+        });
+
+        setMemoryLog(prev => [{ 
+          id: Date.now().toString(), 
+          text: `[EXTERNAL_AI] ¡Imagen inyectada con éxito! Añadida como capa de esceografía anime.`, 
+          time: new Date().toLocaleTimeString() 
+        }, ...prev]);
+
+      } else {
+        // Fallback or demo mode when keys are not written yet
+        setMemoryLog(prev => [{ 
+          id: Date.now().toString(), 
+          text: `[EXTERNAL_AI] No tienes llaves de API configuradas. Creando backdrop de previsualización de ${animeCategory}...`, 
+          time: new Date().toLocaleTimeString() 
+        }, ...prev]);
+
+        // Standard high-quality dynamic anime-vibe art placeholders from Unsplash corresponding to category
+        let randomUrl = 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=600&auto=format&fit=crop'; // anime aesthetic
+        if (animeCategory === 'background') {
+          randomUrl = 'https://images.unsplash.com/photo-1541701494587-cb58502866ab?q=80&w=600&auto=format&fit=crop'; // scenery abstract/landscape
+        } else if (animeCategory === 'character') {
+          randomUrl = 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=600&auto=format&fit=crop'; // anime character portrait
+        } else if (animeCategory === 'item') {
+          randomUrl = 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=600&auto=format&fit=crop'; // magical orbs/lights
+        }
+
+        const fallbackUrl = `${randomUrl}&sig=${Math.floor(Math.random() * 1000)}`;
+
+        const assetName = `Fallback_Anime_${animeCategory}`;
+        setExternalAssets(prev => [{ name: assetName, url: fallbackUrl }, ...prev]);
+        addModule({
+          type: 'image',
+          title: assetName,
+          content: fallbackUrl,
+          x: animeCategory === 'background' ? 0 : 30,
+          y: animeCategory === 'background' ? 0 : 20,
+          width: animeCategory === 'background' ? 100 : 40,
+          height: animeCategory === 'background' ? 100 : 60,
+          isLocked: animeCategory === 'background',
+          zIndex: animeCategory === 'background' ? 1 : 12,
+          style: {
+            borderRadius: 0,
+            backgroundColor: 'transparent',
+            opacity: 1,
+            borderWidth: 0,
+            borderColor: 'transparent',
+            parallax: animeCategory === 'background' ? 0.2 : 0.5
+          }
+        });
+
+        setMemoryLog(prev => [{ 
+          id: Date.now().toString(), 
+          text: `[EXTERNAL_AI_DEMO] ¡Capa añadida! (Modo Demo sin API habilitada - Puedes configurar tu API Key en la pestaña "IA Config")`, 
+          time: new Date().toLocaleTimeString() 
+        }, ...prev]);
+      }
+    } catch (e: any) {
+      console.error(e);
+      setMemoryLog(prev => [{ 
+        id: Date.now().toString(), 
+        text: `[EXTERNAL_AI_ERROR] Error al comunicarse con el generador: ${e.message || e}`, 
+        time: new Date().toLocaleTimeString() 
+      }, ...prev]);
+    } finally {
+      setIsGeneratingExternal(false);
+    }
+  };
+
+  const handleTriggerWebhook = async () => {
+    if (!animeWebhook) return;
+    setIsTriggeringWebhook(true);
+    setMemoryLog(prev => [{ 
+      id: Date.now().toString(), 
+      text: `[WEBHOOK] Enviando datos de escena a tu generador externo...`, 
+      time: new Date().toLocaleTimeString() 
+    }, ...prev]);
+
+    try {
+      const res = await fetch(animeWebhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: 'arkaios-484205',
+          firestoreDatabaseId: 'ai-studio-c607e7d0-9d5c-4996-9bd2-1e38cb65d6df',
+          scenarioId: scenario.id,
+          scenarioName: scenario.name,
+          currentSceneId: activeSceneId,
+          activeModules: scenario.modules,
+          fullTimeline: scenario.timeline,
+          userEmail: 'arkaios2026@gmail.com'
+        })
+      });
+
+      if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
+      
+      setMemoryLog(prev => [{ 
+        id: Date.now().toString(), 
+        text: `[WEBHOOK_SUCCESS] Sincronización exitosa. Tu generador de anime ha recibido el canvas.`, 
+        time: new Date().toLocaleTimeString() 
+      }, ...prev]);
+    } catch (e: any) {
+      console.error(e);
+      setMemoryLog(prev => [{ 
+        id: Date.now().toString(), 
+        text: `[WEBHOOK_ERROR] Fallo de conexión: ${e.message || e}`, 
+        time: new Date().toLocaleTimeString() 
+      }, ...prev]);
+    } finally {
+      setIsTriggeringWebhook(false);
+    }
+  };
 
   useEffect(() => {
     return onAuthStateChanged(auth, (u) => {
@@ -217,6 +491,60 @@ export default function App() {
   };
 
   const logout = () => signOut(auth);
+
+  const connectWallet = async () => {
+    setIsConnectingWallet(true);
+    setWalletError(null);
+    try {
+      const isInIframe = typeof window !== 'undefined' && window.self !== window.top;
+      if (isInIframe) {
+        throw new Error('Para conectar MetaMask de forma segura, por favor abre la aplicación en una pestaña nueva usando el botón superior "Open in new tab" de AI Studio. Los sandbox de iframe restringen el acceso a extensiones del navegador.');
+      }
+
+      if (typeof window !== 'undefined' && window.ethereum) {
+        setMemoryLog(prev => [{ 
+          id: Date.now().toString(), 
+          text: `[WALLET] Solicitando conexión a MetaMask...`, 
+          time: new Date().toLocaleTimeString() 
+        }, ...prev]);
+        
+        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+        if (accounts && accounts[0]) {
+          const address = accounts[0];
+          setWalletAddress(address);
+          setMemoryLog(prev => [{ 
+            id: Date.now().toString(), 
+            text: `[WALLET] Conectado exitosamente. Dirección: ${address.slice(0, 6)}...${address.slice(-4)}`, 
+            time: new Date().toLocaleTimeString() 
+          }, ...prev]);
+        } else {
+          throw new Error('No accounts selected');
+        }
+      } else {
+        throw new Error('MetaMask is not installed or window.ethereum is blocked. Please install MetaMask extension to connect.');
+      }
+    } catch (e: any) {
+      console.error(e);
+      const errMsg = e instanceof Error ? e.message : 'User rejected the request';
+      setWalletError(errMsg);
+      setMemoryLog(prev => [{ 
+        id: Date.now().toString(), 
+        text: `[WALLET_ERROR] error 0: Failed to connect to MetaMask - ${errMsg}`, 
+        time: new Date().toLocaleTimeString() 
+      }, ...prev]);
+    } finally {
+      setIsConnectingWallet(false);
+    }
+  };
+
+  const disconnectWallet = () => {
+    setWalletAddress(null);
+    setMemoryLog(prev => [{ 
+      id: Date.now().toString(), 
+      text: `[WALLET] Billetera desconectada.`, 
+      time: new Date().toLocaleTimeString() 
+    }, ...prev]);
+  };
 
   const triggerTransition = (style: TransitionStyle) => {
     setTransitionEffect(style);
@@ -684,6 +1012,128 @@ This project was built using Vibe Coding principles with VEO Studio.
     }, ...prev]);
   };
 
+  const handleExportPDF = async (mode: 'current' | 'all') => {
+    setIsGeneratingPdf(true);
+    setPdfProgress('Iniciando exportación...');
+    setMemoryLog(prev => [{ 
+      id: Date.now().toString(), 
+      text: `[PDF_EXPORT] Iniciando compilación de PDF (${mode === 'all' ? 'Manga completo' : 'Escena actual'})...`, 
+      time: new Date().toLocaleTimeString() 
+    }, ...prev]);
+
+    try {
+      const doc = new jsPDF({
+        orientation: 'landscape',
+        unit: 'px',
+        format: [1200, 675]
+      });
+
+      const pagesToRender = mode === 'all' && scenario.timeline.length > 0 
+        ? scenario.timeline 
+        : [{ id: activeSceneId || 'current', description: 'Escena Principal', modules: scenario.modules }];
+
+      const initialSceneId = activeSceneId;
+
+      for (let i = 0; i < pagesToRender.length; i++) {
+        const scene = pagesToRender[i];
+        setPdfProgress(`Rendereando página ${i + 1} de ${pagesToRender.length}...`);
+
+        if (mode === 'all' && scene.id) {
+          handleSelectScene(scene.id);
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
+        const canvasElement = document.getElementById('scenario-canvas');
+        if (canvasElement) {
+          const canvas = await html2canvas(canvasElement, {
+            useCORS: true,
+            backgroundColor: scenario.backgroundColor || '#050505',
+            scale: 1.5,
+            logging: false,
+          });
+          const imgData = canvas.toDataURL('image/png');
+
+          if (i > 0) {
+            doc.addPage([1200, 675], 'landscape');
+          }
+
+          doc.setFillColor(10, 14, 26);
+          doc.rect(0, 0, 1200, 675, 'F');
+          
+          const canvasWidth = 1000;
+          const canvasHeight = 562;
+          const x = (1200 - canvasWidth) / 2;
+          const y = (675 - canvasHeight) / 2 - 20;
+          
+          doc.setDrawColor(99, 102, 241);
+          doc.setLineWidth(4);
+          doc.rect(x - 4, y - 4, canvasWidth + 8, canvasHeight + 8, 'D');
+
+          doc.addImage(imgData, 'PNG', x, y, canvasWidth, canvasHeight, undefined, 'FAST');
+
+          doc.setTextColor(165, 180, 252);
+          doc.setFontSize(18);
+          doc.text(`${scenario.name.toUpperCase()}`, 100, 625);
+
+          doc.setTextColor(148, 163, 184);
+          doc.setFontSize(12);
+          const desc = scene.description || `Panel de Escenografía ${i + 1}`;
+          doc.text(`PANEL / STORYBOARD ${i + 1}: ${desc}`, 100, 642);
+
+          doc.setTextColor(99, 102, 241);
+          doc.setFontSize(10);
+          doc.text(`CREADO CON VEO MANGA ENGINE (DESKTOP STUDIO LOCAL)`, 810, 642);
+        }
+      }
+
+      if (mode === 'all' && initialSceneId) {
+        handleSelectScene(initialSceneId);
+      }
+
+      doc.save(`MANGA_${scenario.name.replace(/\s+/g, '_')}_${mode === 'all' ? 'STORYBOARD' : 'PANEL'}.pdf`);
+      
+      setMemoryLog(prev => [{ 
+        id: Date.now().toString(), 
+        text: `[PDF_EXPORT] ¡PDF compilado con éxito! Guardado como MANGA_${scenario.name.replace(/\s+/g, '_')}.pdf`, 
+        time: new Date().toLocaleTimeString() 
+      }, ...prev]);
+
+    } catch (err: any) {
+      console.error(err);
+      setMemoryLog(prev => [{ 
+        id: Date.now().toString(), 
+        text: `[PDF_ERROR] Error al compilar PDF: ${err.message || err}`, 
+        time: new Date().toLocaleTimeString() 
+      }, ...prev]);
+    } finally {
+      setIsGeneratingPdf(false);
+      setPdfProgress('');
+    }
+  };
+
+  const handleCustomAssetUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0) {
+      Array.from(files).forEach((file: any) => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const dataUrl = event.target?.result as string;
+          setExternalAssets((prev: { name: string; url: string }[]) => [
+            { name: file.name.replace(/\.[^/.]+$/, ""), url: dataUrl },
+            ...prev
+          ]);
+          setMemoryLog(prev => [{ 
+            id: Date.now().toString(), 
+            text: `[ASSETS] Cargado recurso para manga/animación: ${file.name} (PNG Transparente Listo)`, 
+            time: new Date().toLocaleTimeString() 
+          }, ...prev]);
+        };
+        reader.readAsDataURL(file as Blob);
+      });
+      e.target.value = '';
+    }
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -765,11 +1215,29 @@ This project was built using Vibe Coding principles with VEO Studio.
           ) : (
             <button 
               onClick={login}
-              className="flex items-center gap-2 px-3 py-1.5 bg-indigo-500 hover:bg-indigo-400 text-white rounded-lg text-[10px] uppercase font-bold tracking-tight transition-all"
+              className="flex items-center gap-2 px-3 py-1.5 bg-indigo-500/80 hover:bg-indigo-400 text-white rounded-lg text-[10px] uppercase font-bold tracking-tight transition-all"
             >
               Sign In with Google
             </button>
           )}
+
+          {walletAddress ? (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[10px] text-emerald-400 font-bold tracking-tight">
+              <Wallet size={12} className="text-emerald-400 font-bold" />
+              <span>{walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}</span>
+              <button onClick={disconnectWallet} className="ml-1 text-[#f87171] hover:text-white transition-colors" title="Disconnect Wallet">✕</button>
+            </div>
+          ) : (
+            <button 
+              onClick={connectWallet}
+              disabled={isConnectingWallet}
+              className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:border-slate-600 rounded-lg text-[10px] uppercase font-bold tracking-tight transition-all lg:flex"
+            >
+              <Wallet size={12} className={isConnectingWallet ? "animate-pulse" : ""} />
+              {isConnectingWallet ? 'Connecting...' : 'Connect Wallet'}
+            </button>
+          )}
+
           <button 
             onClick={handleManualForge}
             className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-500 border border-amber-600/30 rounded-lg text-[10px] uppercase font-bold tracking-tight transition-all"
@@ -805,11 +1273,39 @@ This project was built using Vibe Coding principles with VEO Studio.
           >
             Export .JSON
           </button>
+          <button 
+            onClick={() => handleExportPDF('current')}
+            disabled={isGeneratingPdf}
+            className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-rose-600/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30 rounded-lg text-[10px] uppercase font-bold tracking-tight transition-all"
+            title="Exportar panel individual activo como página PDF"
+          >
+            <FileDown size={12} />
+            Manga Panel (PDF)
+          </button>
+          <button 
+            onClick={() => handleExportPDF('all')}
+            disabled={isGeneratingPdf}
+            className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-[10px] uppercase font-bold tracking-tight transition-all shadow-[0_0_15px_rgba(225,29,72,0.3)] group animate-pulse"
+            title="Exportar guion gráfico de manga completo secuencial como libro PDF"
+          >
+            <BookOpen size={12} className="group-hover:rotate-6 transition-transform" />
+            Manga Storyboard (PDF)
+          </button>
           <button className="px-4 py-1.5 bg-white text-black font-bold rounded-lg text-[10px] uppercase tracking-tight hover:bg-slate-200 transition-colors">
             Render 8K
           </button>
         </div>
       </header>
+
+      {walletError && (
+        <div className="bg-[#ef4444]/10 border-b border-[#ef4444]/20 px-6 py-2.5 flex items-center justify-between text-xs text-[#f87171] z-30 transition-all font-sans">
+          <div className="flex items-center gap-2.5">
+            <span className="font-mono bg-[#ef4444]/20 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold text-[#ef4444]">error 0</span>
+            <span className="font-medium">Failed to connect to MetaMask: {walletError}</span>
+          </div>
+          <button onClick={() => setWalletError(null)} className="text-[#f87171] hover:text-white transition-colors p-1" title="Close warning">✕</button>
+        </div>
+      )}
 
       <main className="flex-1 flex overflow-hidden z-20">
         <AnimatePresence initial={false}>
@@ -827,23 +1323,29 @@ This project was built using Vibe Coding principles with VEO Studio.
                 </button>
               </div>
 
-              <div className="flex px-5 border-b border-white/5">
+              <div className="flex px-3 border-b border-white/5 gap-1">
                 <button 
                   onClick={() => setSidebarTab('layers')}
-                  className={`flex-1 py-3 text-[10px] uppercase tracking-widest font-bold transition-all border-b-2 ${sidebarTab === 'layers' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-500'}`}
+                  className={`flex-1 py-3 text-[9px] uppercase tracking-wider font-bold transition-all border-b-2 ${sidebarTab === 'layers' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-500'}`}
                 >
                   Layers
                 </button>
                 <button 
                   onClick={() => setSidebarTab('assets')}
-                  className={`flex-1 py-3 text-[10px] uppercase tracking-widest font-bold transition-all border-b-2 ${sidebarTab === 'assets' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-500'}`}
+                  className={`flex-1 py-3 text-[9px] uppercase tracking-wider font-bold transition-all border-b-2 ${sidebarTab === 'assets' ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-slate-500'}`}
                 >
                   Assets
+                </button>
+                <button 
+                  onClick={() => setSidebarTab('ai_config')}
+                  className={`flex-1 py-3 text-[9px] uppercase tracking-wider font-bold transition-all border-b-2 ${sidebarTab === 'ai_config' ? 'border-rose-500 text-rose-400 flex items-center justify-center gap-1' : 'border-transparent text-slate-500 hover:text-slate-300'}`}
+                >
+                  <Sparkles size={10} /> IA Config
                 </button>
               </div>
 
               <div className="flex-1 overflow-auto custom-scrollbar">
-                {sidebarTab === 'layers' ? (
+                {sidebarTab === 'layers' && (
                   <div className="p-5 space-y-6">
                     {/* AI Agent Proactive Suggetions */}
                     {aiSuggestions.length > 0 && (
@@ -940,8 +1442,82 @@ This project was built using Vibe Coding principles with VEO Studio.
                       </div>
                     </section>
                   </div>
-                ) : (
+                )}
+
+                {sidebarTab === 'assets' && (
                   <div className="p-5 space-y-6">
+                    {/* Manga and Character Studio Upload Panel */}
+                    <section className="p-4 bg-indigo-500/5 rounded-2xl border border-indigo-500/10 space-y-4">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wider text-indigo-400 font-bold flex items-center gap-1.5 mb-1">
+                          <Palette size={12} /> Estudio de Manga & 2D
+                        </p>
+                        <p className="text-[9px] text-slate-400">
+                          Sube tus personajes, bocadillos de diálogo y objetos PNG transparentes para componer escenas.
+                        </p>
+                      </div>
+
+                      <div 
+                        onClick={() => assetUploadInputRef.current?.click()}
+                        className="py-6 border border-dashed border-indigo-500/30 hover:border-indigo-500/70 bg-indigo-500/5 hover:bg-indigo-500/10 rounded-xl flex flex-col items-center justify-center gap-2 cursor-pointer transition-all group"
+                      >
+                        <Upload size={20} className="text-indigo-400 group-hover:scale-110 transition-transform" />
+                        <span className="text-[10px] font-bold uppercase tracking-tight text-slate-300">Cargar Recursos PNG</span>
+                        <input 
+                          type="file" 
+                          ref={assetUploadInputRef} 
+                          onChange={handleCustomAssetUpload} 
+                          accept="image/png, image/jpeg, image/gif" 
+                          multiple 
+                          className="hidden" 
+                        />
+                      </div>
+
+                      {externalAssets.length > 0 && (
+                        <div className="space-y-2">
+                          <p className="text-[9px] uppercase tracking-widest text-slate-500 font-bold">Mis Capas Transparentes ({externalAssets.length})</p>
+                          <div className="grid grid-cols-3 gap-2">
+                            {externalAssets.map((asset, i) => (
+                              <div
+                                key={i}
+                                className="relative flex flex-col gap-1 p-1 bg-black/40 rounded-lg border border-white/5 hover:border-indigo-500/30 transition-all text-left group"
+                              >
+                                <div 
+                                  onClick={() => addModule({
+                                    type: 'image',
+                                    title: asset.name,
+                                    content: asset.url,
+                                    x: 35, y: 35, width: 30, height: 30,
+                                    isLocked: false,
+                                    zIndex: 10,
+                                    style: { borderRadius: 0, backgroundColor: 'transparent', opacity: 1, borderWidth: 0, borderColor: 'transparent' }
+                                  })}
+                                  className="aspect-square bg-slate-900 rounded-md overflow-hidden flex items-center justify-center cursor-pointer relative"
+                                  title="Añadir al canvas"
+                                >
+                                  <img src={asset.url} className="max-w-full max-h-full object-contain filter drop-shadow(0 4px 6px rgba(0,0,0,0.3))" alt={asset.name} />
+                                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                    <Plus size={14} className="text-white" />
+                                  </div>
+                                </div>
+                                <span className="text-[8px] font-medium truncate text-slate-300 px-0.5">{asset.name}</span>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setExternalAssets((prev: { name: string; url: string }[]) => prev.filter((_, idx) => idx !== i));
+                                  }}
+                                  className="absolute top-1 right-1 p-1 bg-red-500/20 hover:bg-red-500 rounded text-red-400 hover:text-white transition-all opacity-0 group-hover:opacity-100"
+                                  title="Eliminar recurso"
+                                >
+                                  <X size={8} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </section>
+
                     <section>
                       <p className="text-[10px] uppercase tracking-widest text-slate-500 font-bold mb-4">Cloud Assets</p>
                       <div className="grid grid-cols-2 gap-3">
@@ -980,6 +1556,390 @@ This project was built using Vibe Coding principles with VEO Studio.
                       <div className="p-4 bg-indigo-500/5 rounded-2xl border border-indigo-500/10">
                         <Sparkles className="mx-auto mb-2 text-indigo-400" size={18} />
                         <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Use the AI prompt to search and inject more Google Cloud assets automatically.</p>
+                      </div>
+                    </section>
+                  </div>
+                )}
+
+                {sidebarTab === 'ai_config' && (
+                  <div className="p-5 space-y-6">
+                    {/* Active Developer Engine card */}
+                    <div className="p-4 bg-gradient-to-br from-rose-500/10 to-indigo-500/10 rounded-2xl border border-rose-500/20 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-[10px] uppercase tracking-wider text-rose-400 font-bold flex items-center gap-1.5">
+                          <Infinity size={12} className="animate-pulse" /> Motor de Realidad Activo
+                        </p>
+                        <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-full font-bold font-mono tracking-wider animate-pulse flex items-center gap-1">● ONLINE</span>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-xs font-bold text-slate-100 font-mono">GEMINI-3.5-FLASH ACTIVE</p>
+                        <p className="text-[8px] text-slate-400 leading-relaxed">
+                          La IA central de Google está activa y lista para reconfigurar el código, describir planos tridimensionales y optimizar el desarrollo de escenarios y fondos.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* API Credentials Card */}
+                    <section className="p-4 bg-slate-900/60 rounded-2xl border border-white/5 space-y-4 text-left">
+                      <div className="flex items-center gap-2">
+                        <Key size={14} className="text-rose-400 font-bold" />
+                        <span className="text-[10px] uppercase font-bold tracking-widest text-slate-300">Credenciales Compartidas</span>
+                      </div>
+                      
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-[8px] uppercase tracking-wider text-slate-400 font-bold mb-1">API Endpoint del Generador (POST)</label>
+                          <input 
+                            type="text"
+                            value={animeImgEndpoint}
+                            onChange={(e) => setAnimeImgEndpoint(e.target.value)}
+                            placeholder="Ej. https://api.stability.ai/v2beta/stable-image/generate/core"
+                            className="w-full bg-black/60 border border-white/10 rounded-lg p-2 text-[10px] font-mono text-slate-100 focus:outline-none focus:border-rose-500/50"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[8px] uppercase tracking-wider text-slate-400 font-bold mb-1">Clave API de Generación (Key 1)</label>
+                          <input 
+                            type="password"
+                            value={animeImgApiKey}
+                            onChange={(e) => setAnimeImgApiKey(e.target.value)}
+                            placeholder="Tu API Key"
+                            className="w-full bg-black/60 border border-white/10 rounded-lg p-2 text-[10px] font-mono text-slate-100 focus:outline-none focus:border-rose-500/50"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[8px] uppercase tracking-wider text-slate-400 font-bold mb-1">Clave API de Obtención (Key 2 / Fetch)</label>
+                          <input 
+                            type="password"
+                            value={animeFetchKey}
+                            onChange={(e) => setAnimeFetchKey(e.target.value)}
+                            placeholder="Clave para obtener recursos ya hechos"
+                            className="w-full bg-black/60 border border-white/10 rounded-lg p-2 text-[10px] font-mono text-slate-100 focus:outline-none focus:border-rose-500/50"
+                          />
+                        </div>
+
+                        <div className="p-2 bg-rose-500/5 rounded-lg border border-rose-500/10 text-[8px] text-slate-400 leading-normal">
+                          Configura estas APIs para conectarte con tus generadores externos. Si se dejan vacías, el sistema operará en **Modo Demostración** con recursos de alta fidelidad.
+                        </div>
+                      </div>
+                    </section>
+
+                    {/* Interactive Prompt Architect */}
+                    <section className="p-4 bg-slate-900/60 rounded-2xl border border-white/5 space-y-4 text-left">
+                      <div className="flex items-center gap-2">
+                        <Palette size={14} className="text-indigo-400" />
+                        <span className="text-[10px] uppercase font-bold tracking-widest text-slate-300">Arquitecto de Manga Anime</span>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="flex bg-black/40 p-1 rounded-lg border border-white/5">
+                          {(['background', 'character', 'item'] as const).map(cat => (
+                            <button
+                              key={cat}
+                              onClick={() => {
+                                setAnimeCategory(cat);
+                                setOptimizedPrompt('');
+                              }}
+                              className={`flex-1 py-1 text-[8px] font-bold uppercase rounded-md transition-all ${animeCategory === cat ? 'bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 shadow-[0_0_8px_rgba(99,102,241,0.2)]' : 'text-slate-500 hover:text-slate-400'}`}
+                            >
+                              {cat === 'background' ? 'Fondo' : cat === 'character' ? 'Personaje' : 'Objeto'}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div>
+                          <label className="block text-[8px] uppercase tracking-wider text-slate-400 font-bold mb-1">Tu idea original (Español o simple)</label>
+                          <textarea
+                            value={animePromptText}
+                            onChange={(e) => setAnimePromptText(e.target.value)}
+                            rows={3}
+                            className="w-full bg-black/60 border border-white/10 rounded-lg p-2 text-[10px] leading-relaxed text-slate-100 focus:outline-none focus:border-indigo-500/50"
+                          />
+                        </div>
+
+                        <button
+                          onClick={handleOptimizePrompt}
+                          disabled={isOptimizingPrompt || !animePromptText.trim()}
+                          className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white font-bold rounded-xl text-[10px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all"
+                        >
+                          {isOptimizingPrompt ? (
+                            <>
+                              <div className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+                              <span>Optimizando por Gemini...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles size={12} />
+                              <span>Optimizar Prompt Con Gemini</span>
+                            </>
+                          )}
+                        </button>
+
+                        {optimizedPrompt && (
+                          <div className="space-y-2 mt-4">
+                            <label className="block text-[8px] uppercase tracking-wider text-emerald-400 font-bold">Prompt Optimizado en Inglés (Listo para la IA)</label>
+                            <div className="relative">
+                              <textarea
+                                value={optimizedPrompt}
+                                readOnly
+                                rows={4}
+                                className="w-full bg-black/60 border border-emerald-500/20 rounded-lg p-2 text-[9px] font-mono leading-relaxed text-emerald-400 focus:outline-none"
+                              />
+                              <button
+                                onClick={() => {
+                                  navigator.clipboard.writeText(optimizedPrompt);
+                                  setMemoryLog(p => [{ id: Date.now().toString(), text: `[PROMPT] Copiado prompt optimizado al portapapeles.`, time: new Date().toLocaleTimeString() }, ...p]);
+                                }}
+                                className="absolute bottom-2 right-2 px-2 py-1 bg-emerald-500/20 hover:bg-emerald-500 text-emerald-400 hover:text-black border border-emerald-500/20 rounded text-[8px] tracking-tight transition-all uppercase font-mono"
+                              >
+                                Copiar
+                              </button>
+                            </div>
+                            
+                            <button
+                              onClick={handleGenerateExternalImage}
+                              disabled={isGeneratingExternal}
+                              className="w-full py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white font-bold rounded-xl text-[10px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-[0_0_12px_rgba(225,29,72,0.3)]"
+                            >
+                              {isGeneratingExternal ? (
+                                <>
+                                  <div className="w-3.5 h-3.5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
+                                  <span>Generando Animación / Retrato...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Palette size={12} />
+                                  <span>Generar e Inyectar en Canvas</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </section>
+
+                    {/* Consume local system API section / REST Endpoint URL */}
+                    <section className="p-4 bg-slate-900/60 rounded-2xl border border-white/5 space-y-4 text-left">
+                      <div className="flex items-center gap-2">
+                        <Globe size={14} className="text-indigo-400 animate-spin" style={{ animationDuration: '6s' }} />
+                        <span className="text-[10px] uppercase font-bold tracking-widest text-slate-300">Consumir API de este Sistema</span>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <p className="text-[9px] uppercase tracking-wide text-slate-500 font-bold">Dirección de Sincronización REST de Firestore</p>
+                          <p className="text-[8px] text-slate-400 leading-normal">
+                            Tu generador de anime externo puede orquestar este canvas enviando orquestaciones directas en formato JSON al endpoint REST del documento activo:
+                          </p>
+                          <div className="flex bg-black p-2 rounded-xl border border-white/10 items-center justify-between gap-1 overflow-hidden">
+                            <span className="text-[8px] font-mono text-indigo-300 truncate select-all">{`https://firestore.googleapis.com/v1/projects/arkaios-484205/databases/ai-studio-c607e7d0-9d5c-4996-9bd2-1e38cb65d6df/documents/scenarios/${scenario.id}`}</span>
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(`https://firestore.googleapis.com/v1/projects/arkaios-484205/databases/ai-studio-c607e7d0-9d5c-4996-9bd2-1e38cb65d6df/documents/scenarios/${scenario.id}`);
+                                setMemoryLog(p => [{ id: Date.now().toString(), text: `[API] Endpoint de persistencia exportado al portapapeles.`, time: new Date().toLocaleTimeString() }, ...p]);
+                              }}
+                              className="px-2 py-1 bg-white/5 hover:bg-indigo-500/30 text-indigo-400 hover:text-white rounded border border-indigo-500/30 text-[8px] transition-all"
+                            >
+                              Copiar
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2 border-t border-white/5 pt-3">
+                          <label className="block text-[8px] uppercase tracking-wider text-slate-400 font-bold">Enviar Activo a Webhook Externo</label>
+                          <input 
+                            type="text"
+                            value={animeWebhook}
+                            onChange={(e) => setAnimeWebhook(e.target.value)}
+                            placeholder="Ej. https://hook.integromat.com/o283has..."
+                            className="w-full bg-black/60 border border-white/10 rounded-lg p-2 text-[10px] font-mono text-slate-300 focus:outline-none focus:border-indigo-500/50"
+                          />
+                          <button
+                            onClick={handleTriggerWebhook}
+                            disabled={isTriggeringWebhook || !animeWebhook.trim()}
+                            className="w-full py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 border border-white/10 font-bold rounded-xl text-[10px] uppercase tracking-wider flex items-center justify-center gap-2 transition-all"
+                          >
+                            {isTriggeringWebhook ? (
+                              <>
+                                <div className="w-3.5 h-3.5 border-2 border-indigo-400 border-t-white rounded-full animate-spin"></div>
+                                <span>Exportando canvas...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Upload size={12} />
+                                <span>POST Scene to Webhook</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </section>
+
+                    {/* MANUAL DE INTEGRACIONES IA Y PREGUNTAS CLAVE */}
+                    <section className="p-4 bg-slate-900/60 rounded-2xl border border-white/5 space-y-4 text-left">
+                      <div className="flex items-center gap-2">
+                        <BookOpen size={14} className="text-rose-400 font-bold" />
+                        <span className="text-[10px] uppercase font-bold tracking-widest text-slate-300">Guía de Motores & Habilidades IA</span>
+                      </div>
+
+                      <div className="space-y-2">
+                        {/* FAQ 1: Vecteezy */}
+                        <div className="border border-white/5 rounded-xl overflow-hidden bg-black/20">
+                          <button
+                            onClick={() => setActiveFaq(activeFaq === 1 ? null : 1)}
+                            className="w-full p-3 flex items-center justify-between gap-2 hover:bg-white/5 transition-all text-left"
+                          >
+                            <span className="text-[10px] font-bold text-slate-200 uppercase tracking-tight flex items-center gap-1.5">
+                              <Info size={11} className="text-yellow-400" /> ¿Sirve Vecteezy para este Proyecto?
+                            </span>
+                            <ChevronDown size={14} className={`text-slate-400 transition-transform ${activeFaq === 1 ? 'rotate-180' : ''}`} />
+                          </button>
+                          
+                          {activeFaq === 1 && (
+                            <div className="p-3 bg-black/40 border-t border-white/5 text-[9px] text-slate-300 space-y-2 leading-relaxed">
+                              <p>
+                                <strong>No es necesaria actualmente:</strong> Vecteezy es excelente para descargar elementos gráficos vectorizados, fotos de stock e ilustraciones prediseñadas. Sin embargo, tu aplicación está diseñada para crear arte nuevo desde cero usando Inteligencia Artificial en tiempo real en lugar de recuperar archivos de stock estáticos.
+                              </p>
+                              <p className="p-2 bg-yellow-500/5 border border-yellow-500/10 rounded text-yellow-400">
+                                Puedes guardar de forma segura tus credenciales de Vecteezy (Account ID: <code className="font-mono bg-black/40 px-1 rounded">144213</code>) para otros proyectos de diseño tradicional, pero aquí no las requerimos.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* FAQ 2: Imagenes API keys */}
+                        <div className="border border-white/5 rounded-xl overflow-hidden bg-black/20">
+                          <button
+                            onClick={() => setActiveFaq(activeFaq === 2 ? null : 2)}
+                            className="w-full p-3 flex items-center justify-between gap-2 hover:bg-white/5 transition-all text-left"
+                          >
+                            <span className="text-[10px] font-bold text-slate-200 uppercase tracking-tight flex items-center gap-1.5">
+                              <ImageIcon size={11} className="text-indigo-400" /> A. Generador de Imágenes (Pollinations y Gemini)
+                            </span>
+                            <ChevronDown size={14} className={`text-slate-400 transition-transform ${activeFaq === 2 ? 'rotate-180' : ''}`} />
+                          </button>
+                          
+                          {activeFaq === 2 && (
+                            <div className="p-3 bg-black/40 border-t border-white/5 text-[9px] text-slate-300 space-y-3 leading-relaxed">
+                              <div>
+                                <p className="font-bold text-slate-200">1. Pollinations.ai (Modo Sandbox predeterminado):</p>
+                                <p className="text-slate-400 text-[8px] mt-0.5">
+                                  <strong>API Key:</strong> 🚫 No requiere ninguna clave (es un canal abierto de uso gratuito).
+                                </p>
+                                <p className="text-slate-400 text-[8px] mt-1">Cómo consumirlo en otro proyecto: Solo realiza una llamada HTTP directa:</p>
+                                <div className="flex bg-black px-2 py-1 rounded text-[8px] font-mono border border-white/5 mt-1 items-center justify-between">
+                                  <span className="truncate text-indigo-300">https://image.pollinations.ai/prompt/anime_classroom...</span>
+                                  <button 
+                                    onClick={() => {
+                                      navigator.clipboard.writeText("https://image.pollinations.ai/prompt/{PROMPT_AQUÍ}?width=768&height=768&nologo=true&seed=42");
+                                      setMemoryLog(p => [{ id: Date.now().toString(), text: `[API] Copiado endpoint de Pollinations al portapapeles.`, time: new Date().toLocaleTimeString() }, ...p]);
+                                    }}
+                                    className="text-[7px] text-indigo-400"
+                                  >
+                                    Copy URL
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="border-t border-white/5 pt-2">
+                                <p className="font-bold text-slate-200">2. Gemini Image (Google Gen AI):</p>
+                                <p className="text-slate-400 text-[8px] mt-0.5">
+                                  <strong>API Key:</strong> Utiliza la <code className="font-mono text-slate-200">GEMINI_API_KEY</code> provista automáticamente.
+                                </p>
+                                <p className="text-slate-400 text-[8px] mt-1">
+                                  Llama al modelo <code className="text-rose-400 font-mono">gemini-2.5-flash-image</code> para estructurar planos o generar bocetos rápidos en Base64 de alta fidelidad.
+                                </p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* FAQ 3: Videos API Keys */}
+                        <div className="border border-white/5 rounded-xl overflow-hidden bg-black/20">
+                          <button
+                            onClick={() => setActiveFaq(activeFaq === 3 ? null : 3)}
+                            className="w-full p-3 flex items-center justify-between gap-2 hover:bg-white/5 transition-all text-left"
+                          >
+                            <span className="text-[10px] font-bold text-slate-200 uppercase tracking-tight flex items-center gap-1.5">
+                              <Video size={11} className="text-rose-400" /> B. Animación y Videos (JSON2Video, Veo 3.1)
+                            </span>
+                            <ChevronDown size={14} className={`text-slate-400 transition-transform ${activeFaq === 3 ? 'rotate-180' : ''}`} />
+                          </button>
+                          
+                          {activeFaq === 3 && (
+                            <div className="p-3 bg-black/40 border-t border-white/5 text-[9px] text-slate-300 space-y-3 leading-relaxed">
+                              <div>
+                                <p className="font-bold text-slate-200">1. JSON2Video (Montaje y VFX):</p>
+                                <p className="text-slate-400 text-[8px] mt-0.5">
+                                  <strong>API Key Activa de Respaldo:</strong>
+                                </p>
+                                <div className="flex bg-black px-2 py-1 rounded text-[8px] font-mono border border-white/5 mt-1 items-center justify-between">
+                                  <span className="truncate text-rose-400">sVbVwfFPEiewQYlRC9qKiEM7fcpKlCG9y4cZD7T3</span>
+                                  <button 
+                                    onClick={() => {
+                                      navigator.clipboard.writeText("sVbVwfFPEiewQYlRC9qKiEM7fcpKlCG9y4cZD7T3");
+                                      setMemoryLog(p => [{ id: Date.now().toString(), text: `[API] Copiada API key de JSON2Video al portapapeles.`, time: new Date().toLocaleTimeString() }, ...p]);
+                                    }}
+                                    className="text-[7px] text-rose-400 font-bold"
+                                  >
+                                    Copiar Key
+                                  </button>
+                                </div>
+                                <p className="text-slate-400 text-[7px] mt-1 leading-normal">
+                                  Permite animar capas vectoriales y renderizar el montaje final en la nube de alta consistencia cinematográfica.
+                                </p>
+                              </div>
+
+                              <div className="border-t border-white/5 pt-2">
+                                <p className="font-bold text-slate-200">2. Veo 3.1 Lite (Modelo de Video Google):</p>
+                                <p className="text-slate-400 text-[8px] mt-0.5">
+                                  Utiliza el modelo <code className="text-rose-400 font-mono">veo-3.1-lite-generate-preview</code> en tu servidor Express alimentado por tu API Key de Gemini para orquestar clips estilizados de 4 segundos.
+                                </p>
+                              </div>
+
+                              <div className="border-t border-white/5 pt-2">
+                                <p className="font-bold text-slate-200">3. Arkaios Custom frame-blending engine:</p>
+                                <p className="text-slate-400 text-[8px] mt-0.5">
+                                  🚫 No requiere clave API externa. Genera progresivamente 5 variaciones cinemáticas entrelazadas en frontend para dar un efecto inmediato libre de cargos de servidor.
+                                </p>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* FAQ 4: Consumir API de este sistema */}
+                        <div className="border border-white/5 rounded-xl overflow-hidden bg-black/20">
+                          <button
+                            onClick={() => setActiveFaq(activeFaq === 4 ? null : 4)}
+                            className="w-full p-3 flex items-center justify-between gap-2 hover:bg-white/5 transition-all text-left"
+                          >
+                            <span className="text-[10px] font-bold text-slate-200 uppercase tracking-tight flex items-center gap-1.5">
+                              <Globe size={11} className="text-emerald-400" /> C. ¿Cómo Consumir la API de este Sistema?
+                            </span>
+                            <ChevronDown size={14} className={`text-slate-400 transition-transform ${activeFaq === 4 ? 'rotate-180' : ''}`} />
+                          </button>
+                          
+                          {activeFaq === 4 && (
+                            <div className="p-3 bg-black/40 border-t border-white/5 text-[9px] text-slate-300 space-y-2 leading-relaxed">
+                              <p className="text-slate-400">
+                                Tu generador externo de anime puede consultar o actualizar este editor leyendo el documento Firestore activo en tiempo real:
+                              </p>
+                              <div className="p-2 bg-black rounded text-[8px] font-mono border border-white/5 overflow-auto max-h-32">
+                                <pre className="text-emerald-400">{`// GET scenario data
+fetch('https://firestore.googleapis.com/v1/projects/arkaios-484205/databases/ai-studio-c607e7d0-9d5c-4996-9bd2-1e38cb65d6df/documents/scenarios/${scenario.id}')
+  .then(res => res.json())
+  .then(data => {
+    console.log("Timeline & capas listas para el renderizador externo:", data);
+  });`}</pre>
+                              </div>
+                              <p className="text-slate-500 text-[8px] leading-normal">
+                                Esto sirve como una base de datos excelente para desarrollar escenarios y fondos de manga desde una aplicación de inteligencia artificial independiente.
+                              </p>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </section>
                   </div>
@@ -1272,6 +2232,37 @@ This project was built using Vibe Coding principles with VEO Studio.
                          />
                        ))}
                     </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* PDF Generation Overlay */}
+            <AnimatePresence>
+              {isGeneratingPdf && (
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute inset-0 z-[200] flex flex-col items-center justify-center bg-slate-950/95 backdrop-blur-md"
+                >
+                  <div className="relative w-24 h-24 mb-6 flex items-center justify-center">
+                    <div className="absolute w-12 h-16 border-2 border-rose-500 rounded bg-rose-950/20 shadow-[0_0_15px_rgba(244,63,94,0.3)] flex items-center justify-center">
+                      <BookOpen size={24} className="text-rose-400 animate-pulse" />
+                    </div>
+                    <div className="absolute inset-0 border-2 border-rose-500/10 rounded-full animate-spin border-t-rose-400" style={{ animationDuration: '1.5s' }}></div>
+                  </div>
+
+                  <div className="flex flex-col items-center gap-3 px-10 text-center max-w-sm">
+                    <p className="text-sm font-bold text-slate-100 uppercase tracking-widest flex items-center gap-2">
+                      <Sparkles className="text-rose-400 animate-ping" size={14} /> Creando Libro Manga (.PDF)
+                    </p>
+                    <p className="text-xs text-rose-400 font-mono tracking-tight bg-rose-500/10 px-3 py-1 rounded-full border border-rose-500/20">
+                      {pdfProgress || 'Procesando páginas...'}
+                    </p>
+                    <p className="text-[10px] text-slate-500 leading-relaxed font-sans">
+                      Por favor, mantén la ventana del editor abierta. Capturando capas vectoriales de cada escena en alta fidelidad de impresión...
+                    </p>
                   </div>
                 </motion.div>
               )}
