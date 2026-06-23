@@ -248,6 +248,17 @@ export default function App() {
     localStorage.setItem('manga_img_webhook', animeWebhook);
   }, [animeWebhook]);
 
+  // Escape key to exit cinematic / final viewMode
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && viewMode === 'final') {
+        setViewMode('editor');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [viewMode]);
+
   const handleOptimizePrompt = async () => {
     if (!animePromptText.trim()) return;
     setIsOptimizingPrompt(true);
@@ -1202,96 +1213,96 @@ This project was built using Vibe Coding principles with VEO Studio.
           </div>
         )}
 
-        <div className="flex items-center gap-3">
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-full">
-            <div className="w-2 h-2 rounded-full bg-indigo-500 animate-ping" />
-            <span className="text-[9px] font-bold text-indigo-400 tracking-tighter uppercase font-mono">VEO_DIRECTOR // ONLINE</span>
+        <div className="flex items-center gap-1 xl:gap-1.5">
+          <div className="hidden xl:flex items-center gap-1 px-1.5 py-0.5 bg-indigo-500/10 border border-indigo-500/20 rounded-full">
+            <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-ping" />
+            <span className="text-[8px] font-bold text-indigo-400 tracking-tighter uppercase font-mono">VEO ONLINE</span>
           </div>
           {user ? (
-            <div className="flex items-center gap-3 pr-2 border-r border-white/10">
-              <img src={user.photoURL || ''} className="w-6 h-6 rounded-full border border-indigo-500/30 shadow-[0_0_10px_rgba(99,102,241,0.2)]" alt="" />
-              <button onClick={logout} className="text-slate-500 hover:text-white transition-colors"><LogOut size={14}/></button>
+            <div className="flex items-center gap-2 pr-1 border-r border-white/10">
+              <img src={user.photoURL || ''} className="w-5 h-5 rounded-full border border-indigo-500/30 shadow-[0_0_8px_rgba(99,102,241,0.2)]" alt="" />
+              <button onClick={logout} className="text-slate-500 hover:text-white transition-colors"><LogOut size={12}/></button>
             </div>
           ) : (
             <button 
               onClick={login}
-              className="flex items-center gap-2 px-3 py-1.5 bg-indigo-500/80 hover:bg-indigo-400 text-white rounded-lg text-[10px] uppercase font-bold tracking-tight transition-all"
+              className="flex items-center gap-1 px-2 py-1 bg-indigo-500/80 hover:bg-indigo-400 text-white rounded-md text-[8.5px] uppercase font-bold tracking-tight transition-all"
             >
-              Sign In with Google
+              Sign In
             </button>
           )}
 
           {walletAddress ? (
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-[10px] text-emerald-400 font-bold tracking-tight">
-              <Wallet size={12} className="text-emerald-400 font-bold" />
-              <span>{walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}</span>
-              <button onClick={disconnectWallet} className="ml-1 text-[#f87171] hover:text-white transition-colors" title="Disconnect Wallet">✕</button>
+            <div className="flex items-center gap-1 px-2 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-md text-[8.5px] text-emerald-400 font-bold tracking-tight">
+              <Wallet size={10} className="text-emerald-400 font-bold" />
+              <span>{walletAddress.slice(0, 4)}...{walletAddress.slice(-4)}</span>
+              <button onClick={disconnectWallet} className="ml-1 text-[#f87171] hover:text-white transition-colors" title="Disconnect">✕</button>
             </div>
           ) : (
             <button 
               onClick={connectWallet}
               disabled={isConnectingWallet}
-              className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:border-slate-600 rounded-lg text-[10px] uppercase font-bold tracking-tight transition-all lg:flex"
+              className="flex items-center gap-1 px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:border-slate-600 rounded-md text-[8.5px] uppercase font-bold tracking-tight transition-all"
             >
-              <Wallet size={12} className={isConnectingWallet ? "animate-pulse" : ""} />
-              {isConnectingWallet ? 'Connecting...' : 'Connect Wallet'}
+              <Wallet size={10} className={isConnectingWallet ? "animate-pulse" : ""} />
+              {isConnectingWallet ? '...' : 'Wallet'}
             </button>
           )}
 
           <button 
             onClick={handleManualForge}
-            className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-500 border border-amber-600/30 rounded-lg text-[10px] uppercase font-bold tracking-tight transition-all"
+            className="hidden sm:flex items-center gap-1 px-2 py-1 bg-amber-600/20 hover:bg-amber-600/30 text-amber-500 border border-amber-600/30 rounded-md text-[8.5px] uppercase font-bold tracking-tight transition-all"
             title="Bypass AI - Manual Mode"
           >
-            <MousePointer2 size={12} />
-            Manual Forge
+            <MousePointer2 size={10} />
+            Manual
           </button>
           <button 
             onClick={handleExportGitHub}
-            className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-[10px] uppercase font-bold tracking-tight transition-all border border-white/10 group"
+            className="hidden sm:flex items-center gap-1 px-2 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded-md text-[8.5px] uppercase font-bold tracking-tight transition-all border border-white/10 group"
           >
-            <Github size={12} className="group-hover:rotate-12 transition-transform" />
-            GitHub Ready
+            <Github size={10} className="group-hover:rotate-12 transition-transform" />
+            GitHub
           </button>
           <button 
             onClick={handleExportDesktop}
-            className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[10px] uppercase font-bold tracking-tight transition-all shadow-[0_0_15px_rgba(79,70,229,0.3)] group"
+            className="hidden md:flex items-center gap-1 px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md text-[8.5px] uppercase font-bold tracking-tight transition-all shadow-[0_0_8px_rgba(79,70,229,0.3)] group"
           >
-            <Monitor size={12} className="group-hover:scale-110 transition-transform" />
-            Forge Desktop (.EXE)
+            <Monitor size={10} className="group-hover:scale-110 transition-transform" />
+            Desktop (.EXE)
           </button>
           <button 
             onClick={handleExportZip}
-            className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] uppercase font-bold tracking-tight transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)] group"
+            className="hidden md:flex items-center gap-1 px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-[8.5px] uppercase font-bold tracking-tight transition-all shadow-[0_0_8px_rgba(16,185,129,0.3)] group"
           >
-            <Download size={12} className="group-hover:translate-y-0.5 transition-transform" />
-            Export APK (Zip)
+            <Download size={10} className="group-hover:translate-y-0.5 transition-transform" />
+            APK (Zip)
           </button>
           <button 
             onClick={exportToJson}
-            className="px-3 py-1.5 border border-white/10 rounded-lg text-[10px] uppercase font-bold tracking-tight hover:bg-white/5 transition-colors"
+            className="px-2 py-1 border border-white/10 rounded-md text-[8.5px] uppercase font-bold tracking-tight hover:bg-white/5 transition-colors"
           >
-            Export .JSON
+            JSON
           </button>
           <button 
             onClick={() => handleExportPDF('current')}
             disabled={isGeneratingPdf}
-            className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-rose-600/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30 rounded-lg text-[10px] uppercase font-bold tracking-tight transition-all"
+            className="hidden md:flex items-center gap-1 px-2 py-1 bg-rose-600/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30 rounded-md text-[8.5px] uppercase font-bold tracking-tight transition-all"
             title="Exportar panel individual activo como página PDF"
           >
-            <FileDown size={12} />
-            Manga Panel (PDF)
+            <FileDown size={10} />
+            Manga Panel
           </button>
           <button 
             onClick={() => handleExportPDF('all')}
             disabled={isGeneratingPdf}
-            className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-[10px] uppercase font-bold tracking-tight transition-all shadow-[0_0_15px_rgba(225,29,72,0.3)] group animate-pulse"
+            className="hidden lg:flex items-center gap-1 px-2 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-md text-[8.5px] uppercase font-bold tracking-tight transition-all shadow-[0_0_12px_rgba(225,29,72,0.3)] group animate-pulse"
             title="Exportar guion gráfico de manga completo secuencial como libro PDF"
           >
-            <BookOpen size={12} className="group-hover:rotate-6 transition-transform" />
-            Manga Storyboard (PDF)
+            <BookOpen size={10} className="group-hover:rotate-6 transition-transform" />
+            Storyboard
           </button>
-          <button className="px-4 py-1.5 bg-white text-black font-bold rounded-lg text-[10px] uppercase tracking-tight hover:bg-slate-200 transition-colors">
+          <button className="px-2.5 py-1 bg-white text-black font-bold rounded-md text-[8.5px] uppercase tracking-tight hover:bg-slate-200 transition-colors">
             Render 8K
           </button>
         </div>
@@ -2114,9 +2125,22 @@ fetch('https://firestore.googleapis.com/v1/projects/arkaios-484205/databases/ai-
             {viewMode === 'final' && (
               <button 
                 onClick={() => setViewMode('editor')}
-                className="absolute top-4 left-4 z-[999] p-2 bg-black/40 hover:bg-black/80 text-white/40 hover:text-white rounded-full backdrop-blur-md opacity-0 hover:opacity-100 transition-opacity"
+                className="absolute top-4 left-4 z-[999] p-2.5 bg-black/70 hover:bg-black/90 text-white/90 hover:text-white rounded-full backdrop-blur-md border border-white/15 cursor-pointer shadow-lg hover:scale-105 active:scale-95 transition-all flex items-center gap-1.5 px-4"
+                title="Volver al Editor"
               >
-                <ChevronLeft size={20} />
+                <ChevronLeft size={16} />
+                <span className="text-[10px] uppercase font-bold tracking-wider">Volver</span>
+              </button>
+            )}
+
+            {viewMode === 'final' && (
+              <button 
+                onClick={() => setViewMode('editor')}
+                className="absolute top-4 right-4 z-[999] px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-full backdrop-blur-md border border-rose-500/20 shadow-lg shadow-rose-600/30 cursor-pointer hover:scale-105 active:scale-95 transition-all flex items-center gap-1.5"
+                title="Cerrar Modo Cine (Esc)"
+              >
+                <X size={12} className="stroke-[3]" />
+                <span className="text-[10px] uppercase tracking-wider font-sans">Cerrar</span>
               </button>
             )}
             
@@ -2130,24 +2154,24 @@ fetch('https://firestore.googleapis.com/v1/projects/arkaios-484205/databases/ai-
             )}
             
             {viewMode === 'final' && (
-              <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-4 z-[250] opacity-0 hover:opacity-100 transition-opacity">
+              <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center gap-4 z-[250] bg-black/60 border border-white/10 px-5 py-3 rounded-2xl backdrop-blur-xl transition-all duration-300 shadow-[0_20px_50px_rgba(0,0,0,0.5)] opacity-95 hover:opacity-100">
                 <button 
                   onClick={() => setViewMode('editor')}
-                  className="px-4 py-2 bg-black/40 hover:bg-white/10 border border-white/10 rounded-xl backdrop-blur-xl text-[10px] uppercase font-bold tracking-widest text-white/60 hover:text-white transition-all"
+                  className="px-4 py-2 bg-black/40 hover:bg-white/10 border border-white/10 rounded-xl text-[10px] uppercase font-bold tracking-widest text-white/80 hover:text-white transition-all"
                 >
-                  Back to Editor
+                  Editor
                 </button>
                 <button 
                   onClick={togglePlayback} 
-                  className="p-4 bg-white/10 hover:bg-white/20 border border-white/20 rounded-full backdrop-blur-xl text-white shadow-[0_0_20px_rgba(99,102,241,0.2)]"
+                  className="p-4 bg-indigo-600 hover:bg-indigo-500 border border-indigo-500/30 rounded-full text-white shadow-[0_0_20px_rgba(99,102,241,0.4)] hover:scale-105 transition-all"
                 >
-                   {isPlaying ? <Monitor size={24} className="animate-pulse text-indigo-400" /> : <Play size={24} />}
+                   {isPlaying ? <Monitor size={20} className="animate-pulse text-white" /> : <Play size={20} />}
                 </button>
                 <button 
                   onClick={() => setViewMode('preview')}
-                  className="px-4 py-2 bg-black/40 hover:bg-white/10 border border-white/10 rounded-xl backdrop-blur-xl text-[10px] uppercase font-bold tracking-widest text-white/60 hover:text-white transition-all"
+                  className="px-4 py-2 bg-black/40 hover:bg-white/10 border border-white/10 rounded-xl text-[10px] uppercase font-bold tracking-widest text-white/80 hover:text-white transition-all"
                 >
-                  Back to Preview
+                  Preview
                 </button>
               </div>
             )}
