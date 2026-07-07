@@ -53,6 +53,7 @@ import { useScenario } from './hooks/useScenario';
 import { ModuleItem } from './components/ModuleItem';
 import { Timeline } from './components/Timeline';
 import { ProductionSuite } from './components/ProductionSuite';
+import { StudioAIMotion } from './components/StudioAIMotion';
 import { generateScenario, generateTimeline, generateOptimizedPrompt } from './services/geminiService';
 import { AspectRatio, ModuleType, Module, Scene, TransitionStyle, Scenario, ModelEngine } from './types';
 import { auth, googleProvider } from './lib/firebase';
@@ -97,6 +98,7 @@ export default function App() {
     aiSuggestions
   } = useScenario();
 
+  const [isStudioMotionActive, setIsStudioMotionActive] = useState(false);
   const [aiPrompt, setAiPrompt] = useState('');
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [isConnectingWallet, setIsConnectingWallet] = useState(false);
@@ -601,7 +603,19 @@ export default function App() {
     setMemoryLog(prev => [{ id: Date.now().toString(), text: `Recibiendo petición: "${aiPrompt}"`, time: new Date().toLocaleTimeString() }, ...prev]);
     
     try {
-      const isVideoclip = aiPrompt.toLowerCase().includes('videoclip') || aiPrompt.toLowerCase().includes('video musical') || aiPrompt.toLowerCase().includes('secuencia');
+      const isVideoclip = aiPrompt.toLowerCase().includes('videoclip') || 
+                          aiPrompt.toLowerCase().includes('video musical') || 
+                          aiPrompt.toLowerCase().includes('secuencia') ||
+                          aiPrompt.toLowerCase().includes('video') ||
+                          aiPrompt.toLowerCase().includes('cancion') ||
+                          aiPrompt.toLowerCase().includes('canción') ||
+                          aiPrompt.toLowerCase().includes('musica') ||
+                          aiPrompt.toLowerCase().includes('música') ||
+                          aiPrompt.toLowerCase().includes('musical') ||
+                          aiPrompt.toLowerCase().includes('youtube') ||
+                          aiPrompt.toLowerCase().includes('youtu.be') ||
+                          aiPrompt.toLowerCase().includes('veo') ||
+                          aiPrompt.toLowerCase().includes('clip');
       
       const canvasElement = document.getElementById('scenario-canvas');
       let imageData: string | undefined;
@@ -1177,22 +1191,22 @@ This project was built using Vibe Coding principles with VEO Studio.
         <div className="mesh-ball-2" />
       </div>
 
-      <header className="h-14 border-b border-white/10 bg-white/5 backdrop-blur-md z-30 flex items-center justify-between px-6 shrink-0">
-        <div className="flex items-center gap-4">
-          <div className="w-8 h-8 bg-indigo-500 rounded flex items-center justify-center font-bold text-xs shadow-lg shadow-indigo-500/20 text-white">VEO</div>
-          <span className="text-sm font-semibold tracking-wide uppercase hidden md:block italic">Agent Creator</span>
-          <div className="flex items-center gap-2 ml-4">
+      <header className="h-10 border-b border-white/10 bg-white/5 backdrop-blur-md z-30 flex items-center justify-between px-4 shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-6 h-6 bg-indigo-500 rounded flex items-center justify-center font-bold text-[10px] shadow-lg shadow-indigo-500/20 text-white">VEO</div>
+          <span className="text-xs font-semibold tracking-wide uppercase hidden md:block italic text-indigo-200">Agent Creator</span>
+          <div className="flex items-center gap-1.5 ml-2">
             <input 
               value={scenario.name}
               onChange={(e) => updateScenario({ name: e.target.value })}
-              className="bg-transparent border-none text-xs font-bold text-indigo-400 outline-none focus:text-white min-w-[150px]"
+              className="bg-transparent border-none text-[10px] font-bold text-indigo-400 outline-none focus:text-white min-w-[120px]"
             />
-            {isCloudSyncing ? <Cloud className="text-indigo-400 animate-pulse" size={14}/> : <Cloud size={14} className="text-slate-600"/>}
+            {isCloudSyncing ? <Cloud className="text-indigo-400 animate-pulse" size={12}/> : <Cloud size={12} className="text-slate-600"/>}
           </div>
         </div>
         
         {viewMode !== 'final' && (
-          <div className="flex items-center bg-black/40 rounded-full p-1 border border-white/5">
+          <div className="flex items-center bg-black/40 rounded-full p-0.5 border border-white/5">
             {[
               { id: 'editor' as const, label: 'Editor' },
               { id: 'preview' as const, label: 'Preview' },
@@ -1201,7 +1215,7 @@ This project was built using Vibe Coding principles with VEO Studio.
               <button
                 key={tab.id}
                 onClick={() => setViewMode(tab.id)}
-                className={`px-5 py-1.5 rounded-full text-xs font-medium transition-all ${
+                className={`px-3.5 py-0.5 rounded-full text-[10px] font-medium transition-all ${
                   viewMode === tab.id 
                     ? 'bg-indigo-500 text-white shadow-sm' 
                     : 'text-slate-400 hover:text-white'
@@ -1213,96 +1227,110 @@ This project was built using Vibe Coding principles with VEO Studio.
           </div>
         )}
 
+        {viewMode !== 'final' && (
+          <button
+            onClick={() => setIsStudioMotionActive(!isStudioMotionActive)}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[10px] font-extrabold tracking-wider transition-all cursor-pointer ${
+              isStudioMotionActive 
+                ? 'bg-gradient-to-r from-indigo-500 to-purple-600 text-white shadow-[0_0_15px_rgba(99,102,241,0.4)] border border-indigo-400/30' 
+                : 'bg-black/40 text-indigo-400 hover:text-indigo-200 hover:bg-black/60 border border-white/5'
+            }`}
+          >
+            <Box size={12} className={isStudioMotionActive ? "animate-spin" : "text-indigo-400"} />
+            <span>Studio Motion 3D</span>
+          </button>
+        )}
+
         <div className="flex items-center gap-1 xl:gap-1.5">
-          <div className="hidden xl:flex items-center gap-1 px-1.5 py-0.5 bg-indigo-500/10 border border-indigo-500/20 rounded-full">
-            <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-ping" />
-            <span className="text-[8px] font-bold text-indigo-400 tracking-tighter uppercase font-mono">VEO ONLINE</span>
+          <div className="hidden xl:flex items-center gap-1 px-1 py-0.5 bg-indigo-500/10 border border-indigo-500/20 rounded-full">
+            <div className="w-1 h-1 rounded-full bg-indigo-500 animate-ping" />
+            <span className="text-[7px] font-bold text-indigo-400 tracking-tighter uppercase font-mono">VEO ONLINE</span>
           </div>
           {user ? (
-            <div className="flex items-center gap-2 pr-1 border-r border-white/10">
-              <img src={user.photoURL || ''} className="w-5 h-5 rounded-full border border-indigo-500/30 shadow-[0_0_8px_rgba(99,102,241,0.2)]" alt="" />
-              <button onClick={logout} className="text-slate-500 hover:text-white transition-colors"><LogOut size={12}/></button>
+            <div className="flex items-center gap-1.5 pr-1 border-r border-white/10">
+              <img src={user.photoURL || ''} className="w-4.5 h-4.5 rounded-full border border-indigo-500/30 shadow-[0_0_8px_rgba(99,102,241,0.2)]" alt="" />
+              <button onClick={logout} className="text-slate-500 hover:text-white transition-colors"><LogOut size={10}/></button>
             </div>
           ) : (
             <button 
               onClick={login}
-              className="flex items-center gap-1 px-2 py-1 bg-indigo-500/80 hover:bg-indigo-400 text-white rounded-md text-[8.5px] uppercase font-bold tracking-tight transition-all"
+              className="flex items-center gap-1 px-1.5 py-0.5 bg-indigo-500/80 hover:bg-indigo-400 text-white rounded-md text-[8px] uppercase font-bold tracking-tight transition-all"
             >
               Sign In
             </button>
           )}
 
           {walletAddress ? (
-            <div className="flex items-center gap-1 px-2 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-md text-[8.5px] text-emerald-400 font-bold tracking-tight">
-              <Wallet size={10} className="text-emerald-400 font-bold" />
+            <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded-md text-[8px] text-emerald-400 font-bold tracking-tight">
+              <Wallet size={9} className="text-emerald-400 font-bold" />
               <span>{walletAddress.slice(0, 4)}...{walletAddress.slice(-4)}</span>
-              <button onClick={disconnectWallet} className="ml-1 text-[#f87171] hover:text-white transition-colors" title="Disconnect">✕</button>
+              <button onClick={disconnectWallet} className="ml-0.5 text-[#f87171] hover:text-white transition-colors" title="Disconnect">✕</button>
             </div>
           ) : (
             <button 
               onClick={connectWallet}
               disabled={isConnectingWallet}
-              className="flex items-center gap-1 px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:border-slate-600 rounded-md text-[8.5px] uppercase font-bold tracking-tight transition-all"
+              className="flex items-center gap-0.5 px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:border-slate-600 rounded-md text-[8px] uppercase font-bold tracking-tight transition-all"
             >
-              <Wallet size={10} className={isConnectingWallet ? "animate-pulse" : ""} />
+              <Wallet size={9} className={isConnectingWallet ? "animate-pulse" : ""} />
               {isConnectingWallet ? '...' : 'Wallet'}
             </button>
           )}
 
           <button 
             onClick={handleManualForge}
-            className="hidden sm:flex items-center gap-1 px-2 py-1 bg-amber-600/20 hover:bg-amber-600/30 text-amber-500 border border-amber-600/30 rounded-md text-[8.5px] uppercase font-bold tracking-tight transition-all"
+            className="hidden sm:flex items-center gap-0.5 px-1.5 py-0.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-500 border border-amber-600/30 rounded-md text-[8px] uppercase font-bold tracking-tight transition-all"
             title="Bypass AI - Manual Mode"
           >
-            <MousePointer2 size={10} />
+            <MousePointer2 size={9} />
             Manual
           </button>
           <button 
             onClick={handleExportGitHub}
-            className="hidden sm:flex items-center gap-1 px-2 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded-md text-[8.5px] uppercase font-bold tracking-tight transition-all border border-white/10 group"
+            className="hidden sm:flex items-center gap-0.5 px-1.5 py-0.5 bg-slate-800 hover:bg-slate-700 text-white rounded-md text-[8px] uppercase font-bold tracking-tight transition-all border border-white/10 group font-medium"
           >
-            <Github size={10} className="group-hover:rotate-12 transition-transform" />
+            <Github size={9} className="group-hover:rotate-12 transition-transform" />
             GitHub
           </button>
           <button 
             onClick={handleExportDesktop}
-            className="hidden md:flex items-center gap-1 px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md text-[8.5px] uppercase font-bold tracking-tight transition-all shadow-[0_0_8px_rgba(79,70,229,0.3)] group"
+            className="hidden md:flex items-center gap-0.5 px-1.5 py-0.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md text-[8px] uppercase font-bold tracking-tight transition-all shadow-[0_0_8px_rgba(79,70,229,0.3)] group"
           >
-            <Monitor size={10} className="group-hover:scale-110 transition-transform" />
+            <Monitor size={9} className="group-hover:scale-110 transition-transform" />
             Desktop (.EXE)
           </button>
           <button 
             onClick={handleExportZip}
-            className="hidden md:flex items-center gap-1 px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-[8.5px] uppercase font-bold tracking-tight transition-all shadow-[0_0_8px_rgba(16,185,129,0.3)] group"
+            className="hidden md:flex items-center gap-0.5 px-1.5 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-md text-[8px] uppercase font-bold tracking-tight transition-all shadow-[0_0_8px_rgba(16,185,129,0.3)] group"
           >
-            <Download size={10} className="group-hover:translate-y-0.5 transition-transform" />
+            <Download size={9} className="group-hover:translate-y-0.5 transition-transform" />
             APK (Zip)
           </button>
           <button 
             onClick={exportToJson}
-            className="px-2 py-1 border border-white/10 rounded-md text-[8.5px] uppercase font-bold tracking-tight hover:bg-white/5 transition-colors"
+            className="px-1.5 py-0.5 border border-white/10 rounded-md text-[8px] uppercase font-bold tracking-tight hover:bg-white/5 transition-colors"
           >
             JSON
           </button>
           <button 
             onClick={() => handleExportPDF('current')}
             disabled={isGeneratingPdf}
-            className="hidden md:flex items-center gap-1 px-2 py-1 bg-rose-600/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30 rounded-md text-[8.5px] uppercase font-bold tracking-tight transition-all"
+            className="hidden md:flex items-center gap-0.5 px-1.5 py-0.5 bg-rose-600/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30 rounded-md text-[8px] uppercase font-bold tracking-tight transition-all"
             title="Exportar panel individual activo como página PDF"
           >
-            <FileDown size={10} />
+            <FileDown size={9} />
             Manga Panel
           </button>
           <button 
             onClick={() => handleExportPDF('all')}
             disabled={isGeneratingPdf}
-            className="hidden lg:flex items-center gap-1 px-2 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded-md text-[8.5px] uppercase font-bold tracking-tight transition-all shadow-[0_0_12px_rgba(225,29,72,0.3)] group animate-pulse"
+            className="hidden lg:flex items-center gap-0.5 px-1.5 py-0.5 bg-rose-600 hover:bg-rose-500 text-white rounded-md text-[8px] uppercase font-bold tracking-tight transition-all shadow-[0_0_12px_rgba(225,29,72,0.3)] group animate-pulse"
             title="Exportar guion gráfico de manga completo secuencial como libro PDF"
           >
-            <BookOpen size={10} className="group-hover:rotate-6 transition-transform" />
+            <BookOpen size={9} className="group-hover:rotate-6 transition-transform" />
             Storyboard
           </button>
-          <button className="px-2.5 py-1 bg-white text-black font-bold rounded-md text-[8.5px] uppercase tracking-tight hover:bg-slate-200 transition-colors">
+          <button className="px-2 py-0.5 bg-white text-black font-bold rounded-md text-[8px] uppercase tracking-tight hover:bg-slate-200 transition-colors">
             Render 8K
           </button>
         </div>
@@ -1319,8 +1347,14 @@ This project was built using Vibe Coding principles with VEO Studio.
       )}
 
       <main className="flex-1 flex overflow-hidden z-20">
-        <AnimatePresence initial={false}>
-          {isSidebarOpen && viewMode === 'editor' && (
+        {isStudioMotionActive ? (
+          <div className="flex-1 overflow-y-auto p-6 custom-scrollbar bg-slate-950">
+            <StudioAIMotion />
+          </div>
+        ) : (
+          <>
+            <AnimatePresence initial={false}>
+              {isSidebarOpen && viewMode === 'editor' && (
             <motion.aside
               initial={{ x: -280, opacity: 0 }}
               animate={{ x: 0, opacity: 1 }}
@@ -2107,10 +2141,11 @@ fetch('https://firestore.googleapis.com/v1/projects/arkaios-484205/databases/ai-
             className={`relative bg-[#050505] shadow-[0_40px_100px_rgba(0,0,0,0.8)] border border-white/10 overflow-hidden transition-all duration-700 ${currentRatio.class}`}
             style={{
               backgroundColor: scenario.backgroundColor,
-              width: viewMode === 'final' ? '100vw' : '800px',
-              height: viewMode === 'final' ? '100vh' : '450px',
-              maxHeight: viewMode === 'final' ? 'none' : 'min(75vh, 800px)',
-              maxWidth: viewMode === 'final' ? 'none' : 'min(75vw, 1200px)',
+              width: viewMode === 'final' ? '90vw' : '800px',
+              height: viewMode === 'final' ? 'auto' : '450px',
+              aspectRatio: scenario.aspectRatio ? scenario.aspectRatio.replace(':', '/') : '16/9',
+              maxHeight: viewMode === 'final' ? '82vh' : 'min(75vh, 800px)',
+              maxWidth: viewMode === 'final' ? '1280px' : 'min(75vw, 1200px)',
             }}
           >
             {/* Background Symbols Texture */}
@@ -2376,6 +2411,8 @@ fetch('https://firestore.googleapis.com/v1/projects/arkaios-484205/databases/ai-
               </button>
             </div>
           </div>
+        )}
+          </>
         )}
       </main>
 

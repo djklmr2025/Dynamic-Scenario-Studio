@@ -92,9 +92,11 @@ export const ProductionSuite: React.FC<ProductionSuiteProps> = ({
               </div>
               <button 
                 onClick={() => setShowDashboard(false)}
-                className="px-4 py-2 text-[10px] uppercase font-bold text-slate-500 hover:text-white transition-colors"
+                className="px-4 py-2 bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/20 hover:border-rose-500 rounded-xl text-[11px] uppercase font-bold tracking-wider transition-all flex items-center gap-1.5 shadow-lg cursor-pointer"
+                title="Cerrar Dashboard de Producción"
               >
-                Close Dash
+                <span>Cerrar Dashboard</span>
+                <span className="font-mono text-xs leading-none">✕</span>
               </button>
             </div>
 
