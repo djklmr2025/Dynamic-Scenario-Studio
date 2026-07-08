@@ -11,19 +11,26 @@ const PORT = 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
-// Shared Gemini Client
-const apiKey = process.env.GEMINI_API_KEY;
-if (!apiKey) {
-  console.warn("GEMINI_API_KEY is not defined in the environment.");
-}
-const ai = new GoogleGenAI({ 
-  apiKey: apiKey || '',
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
+// Shared Gemini Client (Lazy Initialized)
+let aiInstance: GoogleGenAI | null = null;
+
+function getAi(): GoogleGenAI {
+  if (!aiInstance) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.warn("GEMINI_API_KEY is not defined in the environment during initialization.");
     }
+    aiInstance = new GoogleGenAI({ 
+      apiKey: apiKey || '',
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
   }
-});
+  return aiInstance;
+}
 
 async function generateContentWithFallback(options: {
   contents: any[];
@@ -35,7 +42,7 @@ async function generateContentWithFallback(options: {
   for (const model of models) {
     try {
       console.log(`[GEMINI_ROUTING] Attempting generation with model: ${model}`);
-      const response = await ai.models.generateContent({
+      const response = await getAi().models.generateContent({
         model,
         contents: options.contents,
         config: options.config,
@@ -128,7 +135,7 @@ const TIMELINE_SCHEMA = {
 app.post("/api/generate-scenario", async (req, res) => {
   try {
     const { prompt, currentScenario, imageData, externalAssets } = req.body;
-    if (!apiKey) {
+    if (!process.env.GEMINI_API_KEY) {
       return res.status(400).json({ error: "API Key de Gemini no configurada." });
     }
 
@@ -193,7 +200,7 @@ app.post("/api/generate-scenario", async (req, res) => {
 app.post("/api/generate-timeline", async (req, res) => {
   try {
     const { prompt, currentScenario, imageData, externalAssets } = req.body;
-    if (!apiKey) {
+    if (!process.env.GEMINI_API_KEY) {
       return res.status(400).json({ error: "API Key de Gemini no configurada." });
     }
 
@@ -267,7 +274,7 @@ app.post("/api/generate-timeline", async (req, res) => {
 app.post("/api/optimize-prompt", async (req, res) => {
   try {
     const { userPrompt, category } = req.body;
-    if (!apiKey) {
+    if (!process.env.GEMINI_API_KEY) {
       return res.status(400).json({ error: "API Key de Gemini no configurada." });
     }
 
