@@ -15,6 +15,7 @@ except Exception:
     pass
 
 FFMPEG_PATH = os.environ.get("FFMPEG_PATH") or shutil.which("ffmpeg") or r"C:\ARKAIOS\ShortGPT\ffmpeg-2026-08-17-git-426841da9d-full_build\bin\ffmpeg.exe"
+PEXELS_KEY = os.environ.get("PEXELS_API_KEY") or "4vj6qTzLM9oc0gN7bdgr3vCO7jRDIBe0zJgknfq9geibx9hdQ16TVxpz"
 
 def update_progress(job_dir, progress, status, details=""):
     progress_file = os.path.join(job_dir, "progress.json")
@@ -24,8 +25,11 @@ def update_progress(job_dir, progress, status, details=""):
         "details": details,
         "timestamp": time.time()
     }
-    with open(progress_file, "w", encoding="utf-8") as f:
-        json.dump(data, f)
+    try:
+        with open(progress_file, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except Exception as e:
+        print(f"[WARN] Error guardando progreso: {e}", flush=True)
     print(f"[{progress}%] {status} - {details}", flush=True)
 
 def parse_time(t_str):
@@ -91,10 +95,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             ass_end = format_ass_time(end_s)
             
             if title:
-                events.append(f"Dialogue: 0,{ass_start},{ass_end},TitleStyle,,0,0,0,,{{\\fad(350,350)}}{title}")
+                events.append(f"Dialogue: 0,{ass_start},{ass_end},TitleStyle,,0,0,0,{{\\fad(350,350)}}{title}")
             if lyric_lines:
                 text_block = "\\N".join(lyric_lines)
-                events.append(f"Dialogue: 1,{ass_start},{ass_end},LyricStyle,,0,0,0,,{{\\fad(350,350)}}{text_block}")
+                events.append(f"Dialogue: 1,{ass_start},{ass_end},LyricStyle,,0,0,0,{{\\fad(350,350)}}{text_block}")
             continue
 
         match_single = re.match(r"^\[(\d{1,2}:\d{2})\]\s*(.*)$", line)
@@ -104,10 +108,63 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             content = match_single.group(2).strip()
             ass_start = format_ass_time(start_s)
             ass_end = format_ass_time(end_s)
-            events.append(f"Dialogue: 0,{ass_start},{ass_end},LyricStyle,,0,0,0,,{{\\fad(300,300)}}{content}")
+            events.append(f"Dialogue: 0,{ass_start},{ass_end},LyricStyle,,0,0,0,{{\\fad(300,300)}}{content}")
         i += 1
 
     return header + "\n".join(events) + "\n"
+
+def search_pexels_video(query, pexels_key=PEXELS_KEY):
+    encoded = urllib.parse.quote(query)
+    url = f"https://api.pexels.com/videos/search?query={encoded}&per_page=6&orientation=landscape"
+    req = urllib.request.Request(url, headers={
+        "Authorization": pexels_key,
+        "User-Agent": "Mozilla/5.0 ARKAIOS-Studio"
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            videos = data.get("videos", [])
+            for v in videos:
+                mp4_files = [f for f in v.get("video_files", []) if f.get("file_type") == "video/mp4"]
+                hd_1080 = [f for f in mp4_files if f.get("width") == 1920 and f.get("height") == 1080]
+                if hd_1080:
+                    return hd_1080[0]["link"]
+                hd_any = [f for f in mp4_files if f.get("quality") == "hd"]
+                if hd_any:
+                    return hd_any[0]["link"]
+                if mp4_files:
+                    return mp4_files[0]["link"]
+    except Exception as e:
+        print(f"[WARN BUSCANDO PEXELS] {query}: {e}", flush=True)
+    return None
+
+def download_video_clip(url, filepath):
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            with open(filepath, "wb") as f:
+                f.write(r.read())
+        return os.path.exists(filepath) and os.path.getsize(filepath) > 50000
+    except Exception as e:
+        print(f"[ERROR DESCARGANDO VIDEO] {e}", flush=True)
+        return False
+
+def normalize_video_clip(ffmpeg_bin, raw_path, out_path, target_duration, width=1920, height=1080):
+    vf = f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},fps=30"
+    cmd = [
+        ffmpeg_bin, "-y",
+        "-i", raw_path,
+        "-t", str(target_duration),
+        "-vf", vf,
+        "-an",
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", "19",
+        "-pix_fmt", "yuv420p",
+        out_path
+    ]
+    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return res.returncode == 0 and os.path.exists(out_path)
 
 def download_image(prompt, filepath, width=1280, height=720):
     if os.path.exists(filepath) and os.path.getsize(filepath) > 10000:
@@ -130,7 +187,7 @@ def download_image(prompt, filepath, width=1280, height=720):
             time.sleep(1)
     return False
 
-def render_scene(ffmpeg_bin, img_path, clip_path, duration, zoom_dir="in", width=1920, height=1080):
+def render_scene_image(ffmpeg_bin, img_path, clip_path, duration, zoom_dir="in", width=1920, height=1080):
     fps = 30
     total_frames = int(fps * duration)
     
@@ -147,6 +204,7 @@ def render_scene(ffmpeg_bin, img_path, clip_path, duration, zoom_dir="in", width
         "-i", img_path,
         "-t", str(duration),
         "-vf", vf,
+        "-an",
         "-c:v", "libx264",
         "-preset", "veryfast",
         "-crf", "20",
@@ -176,13 +234,15 @@ def compile_videoclip(config_path, custom_output_dir=None):
     
     scenes = config.get("scenes", [])
     subtitles_text = config.get("subtitlesText", "")
+    disable_subtitles = config.get("disableSubtitles", True)  # Default clean video without subtitles
+    mode = config.get("mode", "full_motion") # Default to full motion real video
     output_filename = config.get("outputFilename", "final_videoclip.mp4")
     
-    update_progress(job_dir, 5, "INITIALIZING", "Iniciando compilador cinematográfico...")
+    update_progress(job_dir, 5, "INITIALIZING", "Iniciando compilador cinematográfico ARKAIOS...")
     
-    # 1. Crear y formatear archivo de subtítulos ASS
+    # 1. Crear y formatear archivo de subtítulos ASS (si no está deshabilitado)
     sub_file = os.path.join(job_dir, "subtitles.ass")
-    if subtitles_text.strip():
+    if not disable_subtitles and subtitles_text.strip():
         ass_content = parse_lrc_to_ass(subtitles_text, width=width, height=height)
         with open(sub_file, "w", encoding="utf-8") as f:
             f.write(ass_content)
@@ -190,32 +250,58 @@ def compile_videoclip(config_path, custom_output_dir=None):
     # 2. Generar y Renderizar cada Escena
     clips = []
     total_scenes = len(scenes)
+    if total_scenes == 0:
+        update_progress(job_dir, -1, "ERROR", "No se proporcionaron escenas para renderizar.")
+        return {"success": False, "error": "No scenes"}
     
     for idx, sc in enumerate(scenes):
         sc_id = sc.get("id", f"scn_{idx+1}")
         duration = float(sc.get("duration", 10.0))
-        prompt = sc.get("prompt") or sc.get("description", "Cinematic landscape")
-        zoom_dir = sc.get("zoom_dir", "in" if idx % 2 == 0 else "out")
+        query = sc.get("query") or sc.get("prompt") or sc.get("description", "cinematic atmosphere")
+        use_motion = sc.get("motion", True) if mode == "full_motion" else sc.get("motion", False)
         
-        img_path = os.path.join(job_dir, f"{sc_id}.jpg")
         clip_path = os.path.join(job_dir, f"{sc_id}.mp4")
+        raw_clip_path = os.path.join(job_dir, f"{sc_id}_raw.mp4")
         
         percent = int(10 + (idx / total_scenes) * 65)
-        update_progress(job_dir, percent, "GENERATING_SCENE", f"Escena #{idx+1}/{total_scenes} ({duration}s)...")
+        update_progress(job_dir, percent, "GENERATING_SCENE", f"Escena #{idx+1}/{total_scenes} ({duration}s): {query[:40]}...")
         
-        # Check if local image provided
-        local_img = sc.get("imageUrl")
-        if local_img and os.path.exists(local_img):
-            if os.path.abspath(local_img) != os.path.abspath(img_path):
-                shutil.copyfile(local_img, img_path)
-        else:
-            download_image(prompt, img_path, width=img_w, height=img_h)
+        scene_rendered = False
+        
+        # Modo Full Motion (Video Real HD)
+        if use_motion:
+            if not os.path.exists(raw_clip_path) or os.path.getsize(raw_clip_path) < 50000:
+                v_url = search_pexels_video(query)
+                if not v_url:
+                    v_url = search_pexels_video("cinematic night atmosphere")
+                if v_url:
+                    download_video_clip(v_url, raw_clip_path)
             
-        success = render_scene(FFMPEG_PATH, img_path, clip_path, duration, zoom_dir, width, height)
-        if success:
+            if os.path.exists(raw_clip_path) and os.path.getsize(raw_clip_path) > 50000:
+                scene_rendered = normalize_video_clip(FFMPEG_PATH, raw_clip_path, clip_path, duration, width, height)
+        
+        # Fallback a Ken Burns con Imagen si no hubo video o el usuario solicitó imagen
+        if not scene_rendered:
+            img_path = os.path.join(job_dir, f"{sc_id}.jpg")
+            local_img = sc.get("imageUrl")
+            if local_img and os.path.exists(local_img):
+                if os.path.abspath(local_img) != os.path.abspath(img_path):
+                    shutil.copyfile(local_img, img_path)
+            else:
+                download_image(query, img_path, width=img_w, height=img_h)
+            zoom_dir = sc.get("zoom_dir", "in" if idx % 2 == 0 else "out")
+            scene_rendered = render_scene_image(FFMPEG_PATH, img_path, clip_path, duration, zoom_dir, width, height)
+            
+        if scene_rendered and os.path.exists(clip_path):
             clips.append(clip_path)
+        else:
+            print(f"[WARN] Error renderizando escena {sc_id}", flush=True)
             
-    # 3. Concatenar
+    if not clips:
+        update_progress(job_dir, -1, "ERROR", "Ninguna escena pudo ser renderizada.")
+        return {"success": False, "error": "No clips rendered"}
+        
+    # 3. Concatenar tomas
     update_progress(job_dir, 78, "CONCATENATING", "Uniendo tomas cinematográficas...")
     concat_list = os.path.join(job_dir, "concat.txt")
     with open(concat_list, "w", encoding="utf-8") as f:
@@ -233,8 +319,8 @@ def compile_videoclip(config_path, custom_output_dir=None):
     ]
     subprocess.run(cmd_concat, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
     
-    # 4. Mux de Audio y Subtítulos
-    update_progress(job_dir, 90, "FINALIZING", "Sincronizando audio maestro y quemando subtítulos...")
+    # 4. Mux de Audio Maestro y Finalización
+    update_progress(job_dir, 90, "FINALIZING", "Sincronizando pista de audio maestro en alta definición...")
     output_video = os.path.join(job_dir, output_filename)
     
     cmd_final = [FFMPEG_PATH, "-y", "-i", merged_raw]
@@ -242,7 +328,7 @@ def compile_videoclip(config_path, custom_output_dir=None):
     if has_audio:
         cmd_final.extend(["-i", audio_path])
         
-    has_subs = os.path.exists(sub_file) and os.path.getsize(sub_file) > 50
+    has_subs = (not disable_subtitles) and os.path.exists(sub_file) and os.path.getsize(sub_file) > 50
     if has_subs:
         safe_ass = sub_file.replace("\\", "/").replace(":", "\\:")
         cmd_final.extend(["-vf", f"ass='{safe_ass}'"])
@@ -259,7 +345,7 @@ def compile_videoclip(config_path, custom_output_dir=None):
     
     res = subprocess.run(cmd_final, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if res.returncode == 0:
-        update_progress(job_dir, 100, "COMPLETED", f"Videoclip generado: {output_video}")
+        update_progress(job_dir, 100, "COMPLETED", f"Videoclip oficial generado exitosamente: {output_video}")
         return {
             "success": True,
             "outputVideo": output_video,

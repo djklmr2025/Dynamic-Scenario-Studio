@@ -316,7 +316,7 @@ app.use("/renders", express.static(rendersDir));
 
 app.post("/api/videoclip/render", async (req, res) => {
   try {
-    const { audioPath, aspectRatio = "16:9", scenes = [], subtitlesText = "" } = req.body;
+    const { audioPath, aspectRatio = "16:9", scenes = [], subtitlesText = "", mode = "full_motion", disableSubtitles = true } = req.body;
     const jobId = `vc_${Date.now()}`;
     const jobDir = path.join(rendersDir, jobId);
     fs.mkdirSync(jobDir, { recursive: true });
@@ -327,7 +327,9 @@ app.post("/api/videoclip/render", async (req, res) => {
       audioPath,
       aspectRatio,
       scenes,
-      subtitlesText
+      subtitlesText,
+      mode,
+      disableSubtitles
     };
 
     const configPath = path.join(jobDir, "config.json");
