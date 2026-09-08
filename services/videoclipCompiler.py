@@ -17,6 +17,21 @@ except Exception:
 FFMPEG_PATH = os.environ.get("FFMPEG_PATH") or shutil.which("ffmpeg") or r"C:\ARKAIOS\ShortGPT\ffmpeg-2026-08-17-git-426841da9d-full_build\bin\ffmpeg.exe"
 PEXELS_KEY = os.environ.get("PEXELS_API_KEY") or "4vj6qTzLM9oc0gN7bdgr3vCO7jRDIBe0zJgknfq9geibx9hdQ16TVxpz"
 
+def run_cmd_silent(cmd, check=False):
+    kwargs = {
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE
+    }
+    if os.name == "nt":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0
+        kwargs["startupinfo"] = startupinfo
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    if check:
+        return subprocess.run(cmd, check=True, **kwargs)
+    return subprocess.run(cmd, **kwargs)
+
 def update_progress(job_dir, progress, status, details=""):
     progress_file = os.path.join(job_dir, "progress.json")
     data = {
@@ -163,7 +178,7 @@ def normalize_video_clip(ffmpeg_bin, raw_path, out_path, target_duration, width=
         "-pix_fmt", "yuv420p",
         out_path
     ]
-    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    res = run_cmd_silent(cmd)
     return res.returncode == 0 and os.path.exists(out_path)
 
 def download_image(prompt, filepath, width=1280, height=720):
@@ -212,7 +227,7 @@ def render_scene_image(ffmpeg_bin, img_path, clip_path, duration, zoom_dir="in",
         clip_path
     ]
     
-    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    res = run_cmd_silent(cmd)
     return res.returncode == 0
 
 def compile_videoclip(config_path, custom_output_dir=None):
@@ -317,7 +332,7 @@ def compile_videoclip(config_path, custom_output_dir=None):
         "-c", "copy",
         merged_raw
     ]
-    subprocess.run(cmd_concat, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    run_cmd_silent(cmd_concat, check=True)
     
     # 4. Mux de Audio Maestro y Finalización
     update_progress(job_dir, 90, "FINALIZING", "Sincronizando pista de audio maestro en alta definición...")
@@ -343,7 +358,7 @@ def compile_videoclip(config_path, custom_output_dir=None):
         output_video
     ])
     
-    res = subprocess.run(cmd_final, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    res = run_cmd_silent(cmd_final)
     if res.returncode == 0:
         update_progress(job_dir, 100, "COMPLETED", f"Videoclip oficial generado exitosamente: {output_video}")
         return {

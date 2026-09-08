@@ -13,6 +13,17 @@ const PORT = process.env.PORT || 3005;
 
 app.use(express.json({ limit: '10mb' }));
 
+// Enable CORS for PuterLab IDE and local access
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
 // Shared Gemini Client (Lazy Initialized)
 let aiInstance: GoogleGenAI | null = null;
 
@@ -345,7 +356,8 @@ app.post("/api/videoclip/render", async (req, res) => {
     const scriptPath = path.join(process.cwd(), "services", "videoclipCompiler.py");
     const child = spawn(pythonExe, [scriptPath, configPath], {
       detached: true,
-      stdio: "ignore"
+      stdio: "ignore",
+      windowsHide: true
     });
     child.unref();
 
@@ -364,16 +376,184 @@ app.post("/api/videoclip/render", async (req, res) => {
 app.get("/api/videoclip/status/:jobId", (req, res) => {
   try {
     const { jobId } = req.params;
+    if (jobId === "ping") {
+      return res.json({ ok: true, status: "ONLINE", service: "Dynamic Scenario Studio" });
+    }
     const progressFile = path.join(rendersDir, jobId, "progress.json");
     if (!fs.existsSync(progressFile)) {
       return res.status(404).json({ error: "Trabajo de render no encontrado" });
     }
     const data = JSON.parse(fs.readFileSync(progressFile, "utf-8"));
+    const localVideoPath = path.join(rendersDir, jobId, "final_videoclip.mp4");
+    const localFolder = path.join(rendersDir, jobId);
     res.json({
       ok: true,
       jobId,
       ...data,
-      videoUrl: `/renders/${jobId}/final_videoclip.mp4`
+      videoUrl: `/renders/${jobId}/final_videoclip.mp4`,
+      localVideoPath,
+      localFolder
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint para descargar el archivo MP4 con cabecera de descarga forzada
+app.get("/api/videoclip/download/:jobId", (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const filePath = path.join(rendersDir, jobId, "final_videoclip.mp4");
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: "Archivo de video no encontrado" });
+    }
+    res.download(filePath, "Videoclip_Oficial.mp4");
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint para abrir directamente el Explorador de Windows en la carpeta del video
+app.post("/api/videoclip/open-folder", (req, res) => {
+  try {
+    const { jobId, folderPath } = req.body;
+    const targetFolder = folderPath || (jobId ? path.join(rendersDir, jobId) : rendersDir);
+    if (fs.existsSync(targetFolder)) {
+      if (process.platform === "win32") {
+        const filePath = path.join(targetFolder, "final_videoclip.mp4");
+        if (fs.existsSync(filePath)) {
+          spawn("explorer.exe", [`/select,${filePath}`], { detached: true, stdio: "ignore", windowsHide: true });
+        } else {
+          spawn("explorer.exe", [targetFolder], { detached: true, stdio: "ignore", windowsHide: true });
+        }
+      }
+      return res.json({ ok: true, path: targetFolder });
+    }
+    res.status(404).json({ error: "Carpeta no encontrada" });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint para consultar el historial de videoclips y su estado
+app.get("/api/videoclip/recent", (req, res) => {
+  try {
+    if (!fs.existsSync(rendersDir)) {
+      return res.json({ ok: true, jobs: [] });
+    }
+    const folders = fs.readdirSync(rendersDir).filter(f => fs.statSync(path.join(rendersDir, f)).isDirectory());
+    const jobs = folders.map(f => {
+      const jDir = path.join(rendersDir, f);
+      const prgFile = path.join(jDir, "progress.json");
+      const videoFile = path.join(jDir, "final_videoclip.mp4");
+      let prg: any = { progress: 0, status: "UNKNOWN", details: "" };
+      if (fs.existsSync(prgFile)) {
+        try { prg = JSON.parse(fs.readFileSync(prgFile, "utf-8")); } catch {}
+      }
+      let sizeMB = 0;
+      if (fs.existsSync(videoFile)) {
+        sizeMB = Math.round((fs.statSync(videoFile).size / (1024 * 1024)) * 10) / 10;
+      }
+      return {
+        jobId: f,
+        folder: jDir,
+        videoPath: fs.existsSync(videoFile) ? videoFile : null,
+        videoUrl: `/renders/${f}/final_videoclip.mp4`,
+        sizeMB,
+        status: prg.status || (sizeMB > 0 ? "COMPLETED" : "UNKNOWN"),
+        details: prg.details || "",
+        date: fs.statSync(jDir).mtime
+      };
+    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    res.json({ ok: true, jobs });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint para limpiar renders antiguos o liberar espacio
+app.post("/api/videoclip/clean", (req, res) => {
+  try {
+    const { keepLatest = 2, deleteRawClips = true } = req.body;
+    if (!fs.existsSync(rendersDir)) {
+      return res.json({ ok: true, cleaned: 0 });
+    }
+    const folders = fs.readdirSync(rendersDir).filter(f => fs.statSync(path.join(rendersDir, f)).isDirectory())
+      .map(f => ({ name: f, path: path.join(rendersDir, f), mtime: fs.statSync(path.join(rendersDir, f)).mtime }))
+      .sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
+
+    let cleaned = 0;
+    folders.forEach((item, idx) => {
+      if (idx >= keepLatest) {
+        fs.rmSync(item.path, { recursive: true, force: true });
+        cleaned++;
+      } else if (deleteRawClips) {
+        const files = fs.readdirSync(item.path);
+        files.forEach(file => {
+          if (file.endsWith("_raw.mp4") || (file.startsWith("scene_") && file.endsWith(".mp4"))) {
+            try { fs.unlinkSync(path.join(item.path, file)); } catch {}
+          }
+        });
+      }
+    });
+    res.json({ ok: true, cleaned, remaining: folders.length - cleaned });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint para extraer audio/video de YouTube usando Media-Cutter-Studio yt-dlp
+const downloadsDir = path.join(process.cwd(), "public", "downloads");
+if (!fs.existsSync(downloadsDir)) {
+  fs.mkdirSync(downloadsDir, { recursive: true });
+}
+app.use("/downloads", express.static(downloadsDir));
+
+app.post("/api/media/youtube", async (req, res) => {
+  try {
+    const { url, extractAudio = true } = req.body;
+    if (!url) return res.status(400).json({ error: "URL de YouTube requerida" });
+
+    const ytdlpBin = path.join(process.cwd(), "..", "Media-Cutter-Studio-main", "yt-dlp.pyz");
+    const pythonExe = process.env.PYTHON_PATH || (process.platform === "win32" ? "C:\\Python314\\python.exe" : "python3");
+
+    const outputTemplate = path.join(downloadsDir, "%(title)s_%(id)s.%(ext)s");
+    const args = [
+      ytdlpBin,
+      url,
+      "-o", outputTemplate,
+      "--no-playlist",
+      "--no-warnings"
+    ];
+
+    if (extractAudio) {
+      args.push("-x", "--audio-format", "mp3", "--audio-quality", "0");
+    } else {
+      args.push("-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best");
+    }
+
+    const proc = spawn(pythonExe, args, { windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout?.on("data", (d) => { stdout += d.toString(); });
+    proc.stderr?.on("data", (d) => { stderr += d.toString(); });
+
+    proc.on("close", (code) => {
+      if (code === 0) {
+        const files = fs.readdirSync(downloadsDir)
+          .map(f => ({ name: f, path: path.join(downloadsDir, f), time: fs.statSync(path.join(downloadsDir, f)).mtime }))
+          .sort((a, b) => b.time.getTime() - a.time.getTime());
+        const latest = files[0];
+        res.json({
+          ok: true,
+          fileName: latest ? latest.name : "descarga",
+          filePath: latest ? latest.path : "",
+          url: latest ? `/downloads/${latest.name}` : ""
+        });
+      } else {
+        res.status(500).json({ error: "Fallo al descargar de YouTube", details: stderr || stdout });
+      }
     });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

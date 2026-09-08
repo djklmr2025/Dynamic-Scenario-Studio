@@ -6,3 +6,8 @@ coverage/
 *.log
 .env*
 !.env.example
+public/renders/
+__pycache__/
+*.mp4
+*.mp3
+*.pyc
