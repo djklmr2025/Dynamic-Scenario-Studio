@@ -2442,6 +2442,20 @@ fetch('https://firestore.googleapis.com/v1/projects/arkaios-484205/databases/ai-
           <span className="font-mono text-indigo-400/50">60 FPS // 4D_READY</span>
         </div>
       </footer>
+
+      {/* ARKAIOS Production Suite Component */}
+      <ProductionSuite
+        scenarioName={scenario.name}
+        audioTrack={scenario.audioTrack}
+        onSetAudio={setAudioTrack}
+        timeline={scenario.timeline}
+        onSetTimeline={(scenes) => updateScenario({ timeline: scenes })}
+        worldConfig={scenario.worldConfig}
+        onUpdateWorldConfig={updateWorldConfig}
+        onAddScene={addScene}
+        activeEngine={scenario.modelEngine}
+        onUpdateEngine={setModelEngine}
+      />
     </div>
   );
 }

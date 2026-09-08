@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export type AspectRatio = '4:3' | '16:9' | '16:10';
+export type AspectRatio = '4:3' | '16:9' | '16:10' | '9:16';
 
 export type ModelEngine = 'gemini-1.5' | 'gemini-1.0' | 'lyria-audio' | 'gemma-open' | 'applied-ai' | 'video-gen-x' | '4d-db' | 'screenmatch' | 'flow-nexus' | 'cat-4d' | 'physics-sim';
 
@@ -62,6 +62,7 @@ export interface Scene {
   transition: TransitionStyle;
   duration: number; // in seconds
   description?: string; // Lyric or director note
+  imageUrl?: string; // Image path or URL for rendering
   worldConfig?: WorldConfig; // Local overrides for interactive worlds
 }
 

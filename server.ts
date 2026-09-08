@@ -1,5 +1,7 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
+import { spawn } from "child_process";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
@@ -7,7 +9,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3005;
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -300,6 +302,79 @@ app.post("/api/optimize-prompt", async (req, res) => {
   } catch (err: any) {
     console.error("Error in optimize-prompt API:", err);
     res.status(500).json({ error: err.message || "Failed to optimize prompt" });
+  }
+});
+
+// ==========================================================
+//  VIDEOCLIP STUDIO COMPILER API (FFMPEG + KEN BURNS + SUBS)
+// ==========================================================
+const rendersDir = path.join(process.cwd(), "public", "renders");
+if (!fs.existsSync(rendersDir)) {
+  fs.mkdirSync(rendersDir, { recursive: true });
+}
+app.use("/renders", express.static(rendersDir));
+
+app.post("/api/videoclip/render", async (req, res) => {
+  try {
+    const { audioPath, aspectRatio = "16:9", scenes = [], subtitlesText = "" } = req.body;
+    const jobId = `vc_${Date.now()}`;
+    const jobDir = path.join(rendersDir, jobId);
+    fs.mkdirSync(jobDir, { recursive: true });
+
+    const config = {
+      jobId,
+      outputDir: jobDir,
+      audioPath,
+      aspectRatio,
+      scenes,
+      subtitlesText
+    };
+
+    const configPath = path.join(jobDir, "config.json");
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
+
+    fs.writeFileSync(path.join(jobDir, "progress.json"), JSON.stringify({
+      progress: 0,
+      status: "QUEUED",
+      details: "En cola de renderizado en servidor ARKAIOS..."
+    }), "utf-8");
+
+    const pythonExe = "C:\\Python314\\python.exe";
+    const scriptPath = path.join(process.cwd(), "services", "videoclipCompiler.py");
+    const child = spawn(pythonExe, [scriptPath, configPath], {
+      detached: true,
+      stdio: "ignore"
+    });
+    child.unref();
+
+    res.json({
+      ok: true,
+      jobId,
+      statusUrl: `/api/videoclip/status/${jobId}`,
+      videoUrl: `/renders/${jobId}/final_videoclip.mp4`
+    });
+  } catch (err: any) {
+    console.error("Error starting videoclip render:", err);
+    res.status(500).json({ error: err.message || "Failed to start render" });
+  }
+});
+
+app.get("/api/videoclip/status/:jobId", (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const progressFile = path.join(rendersDir, jobId, "progress.json");
+    if (!fs.existsSync(progressFile)) {
+      return res.status(404).json({ error: "Trabajo de render no encontrado" });
+    }
+    const data = JSON.parse(fs.readFileSync(progressFile, "utf-8"));
+    res.json({
+      ok: true,
+      jobId,
+      ...data,
+      videoUrl: `/renders/${jobId}/final_videoclip.mp4`
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
