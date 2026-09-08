@@ -143,6 +143,7 @@ Sólo me queda el frío de la tarde..."""
 def main():
     parser = argparse.ArgumentParser(description="ARKAIOS Studio - Compilador de Videoclips")
     parser.add_argument("--config", help="Ruta al archivo JSON de configuracion del videoclip")
+    parser.add_argument("--out-dir", help="Directorio destino personalizado para el render")
     parser.add_argument("--demo-citricos", action="store_true", help="Compilar videoclip demo 'Citricos y Sal'")
     args = parser.parse_args()
 
@@ -156,11 +157,14 @@ def main():
         with open(args.config, "r", encoding="utf-8") as f:
             config = json.load(f)
     else:
-        print("Uso: python cli_compile.py --demo-citricos O --config ruta_a_config.json")
+        print("Uso: python cli_compile.py --demo-citricos O --config ruta_a_config.json [--out-dir ruta_salida]")
         sys.exit(0)
 
     job_id = "cli_job_" + str(os.getpid())
-    output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "renders", job_id)
+    if args.out_dir:
+        output_dir = args.out_dir
+    else:
+        output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "renders", job_id)
     os.makedirs(output_dir, exist_ok=True)
     
     config_file = os.path.join(output_dir, "config.json")
