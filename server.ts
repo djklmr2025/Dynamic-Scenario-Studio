@@ -339,7 +339,7 @@ app.post("/api/videoclip/render", async (req, res) => {
       details: "En cola de renderizado en servidor ARKAIOS..."
     }), "utf-8");
 
-    const pythonExe = "C:\\Python314\\python.exe";
+    const pythonExe = process.env.PYTHON_PATH || (process.platform === "win32" ? "C:\\Python314\\python.exe" : "python3");
     const scriptPath = path.join(process.cwd(), "services", "videoclipCompiler.py");
     const child = spawn(pythonExe, [scriptPath, configPath], {
       detached: true,

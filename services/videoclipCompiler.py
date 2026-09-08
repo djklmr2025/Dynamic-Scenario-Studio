@@ -12,7 +12,8 @@ try:
 except Exception:
     pass
 
-FFMPEG_PATH = r"C:\ARKAIOS\ShortGPT\ffmpeg-2026-08-17-git-426841da9d-full_build\bin\ffmpeg.exe"
+import shutil
+FFMPEG_PATH = os.environ.get("FFMPEG_PATH") or shutil.which("ffmpeg") or r"C:\ARKAIOS\ShortGPT\ffmpeg-2026-08-17-git-426841da9d-full_build\bin\ffmpeg.exe"
 
 def update_progress(job_dir, progress, status, details=""):
     progress_file = os.path.join(job_dir, "progress.json")

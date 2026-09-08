@@ -1,0 +1,6 @@
+node_modules
+dist
+public/renders/*
+.git
+.env
+.env.local
