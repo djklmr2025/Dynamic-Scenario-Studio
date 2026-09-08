@@ -435,6 +435,38 @@ app.post("/api/videoclip/open-folder", (req, res) => {
   }
 });
 
+// Endpoint para abrir el diálogo nativo de Windows y seleccionar archivo
+app.post("/api/dialog/open-file", async (req, res) => {
+  try {
+    const { title = "Seleccionar Pista de Audio Maestro", filter = "Audio Files (*.mp3;*.wav;*.m4a;*.flac;*.aac;*.ogg)|*.mp3;*.wav;*.m4a;*.flac;*.aac;*.ogg|Todos los Archivos (*.*)|*.*" } = req.body || {};
+    if (process.platform === "win32") {
+      const psScript = `
+        Add-Type -AssemblyName System.Windows.Forms
+        $f = New-Object System.Windows.Forms.OpenFileDialog
+        $f.Filter = '${filter.replace(/'/g, "''")}'
+        $f.Title = '${title.replace(/'/g, "''")}'
+        $f.ShowHelp = $false
+        $top = New-Object System.Windows.Forms.Form
+        $top.TopMost = $true
+        if ($f.ShowDialog($top) -eq [System.Windows.Forms.DialogResult]::OK) {
+          [Console]::Out.Write($f.FileName)
+        }
+      `;
+      const ps = spawn("powershell", ["-STA", "-NoProfile", "-Command", psScript], { windowsHide: true });
+      let out = "";
+      ps.stdout?.on("data", d => { out += d.toString(); });
+      ps.on("close", () => {
+        const filePath = out.trim();
+        res.json({ ok: true, filePath: filePath || null });
+      });
+    } else {
+      res.json({ ok: false, error: "Plataforma no compatible con diálogo de Windows" });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Endpoint para consultar el historial de videoclips y su estado
 app.get("/api/videoclip/recent", (req, res) => {
   try {
