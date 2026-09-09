@@ -5,6 +5,8 @@ import time
 import re
 import math
 import shutil
+import hashlib
+from datetime import datetime
 import urllib.request
 import urllib.parse
 import subprocess
@@ -21,6 +23,128 @@ FFPROBE_PATH = os.environ.get("FFPROBE_PATH") or shutil.which("ffprobe") or (
 )
 PEXELS_KEY = os.environ.get("PEXELS_API_KEY") or "4vj6qTzLM9oc0gN7bdgr3vCO7jRDIBe0zJgknfq9geibx9hdQ16TVxpz"
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+
+# Directorios de Caché Persistente Global de ARKAIOS
+CACHE_DIR = os.environ.get("ARKAIOS_CACHE_DIR") or os.path.join(os.getcwd(), "public", "cache")
+CACHE_VIDEOS_DIR = os.path.join(CACHE_DIR, "videos")
+CACHE_IMAGES_DIR = os.path.join(CACHE_DIR, "images")
+os.makedirs(CACHE_VIDEOS_DIR, exist_ok=True)
+os.makedirs(CACHE_IMAGES_DIR, exist_ok=True)
+
+def log_event(job_dir, message, level="INFO"):
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    formatted = f"[{now_str}] [{level:7s}] {message}\n"
+    
+    if job_dir:
+        # 1. Bitácora local de la sesión de trabajo
+        try:
+            job_log = os.path.join(job_dir, "job.log")
+            with open(job_log, "a", encoding="utf-8") as f:
+                f.write(formatted)
+        except Exception:
+            pass
+
+        # 2. Archivo ARKAIOS_RENDER.log para revisión directa del usuario
+        try:
+            arkaios_log = os.path.join(job_dir, "ARKAIOS_RENDER.log")
+            with open(arkaios_log, "a", encoding="utf-8") as f:
+                f.write(formatted)
+        except Exception:
+            pass
+
+        # 3. Historial global continuo en public/renders
+        try:
+            renders_base = os.path.dirname(os.path.abspath(job_dir))
+            global_log = os.path.join(renders_base, "renders_history.log")
+            job_name = os.path.basename(job_dir)
+            with open(global_log, "a", encoding="utf-8") as f:
+                f.write(f"[{job_name}] {formatted}")
+        except Exception:
+            pass
+
+    print(formatted.strip(), flush=True)
+
+def record_render_history(job_id, job_dir, audio_path, duration, total_scenes, output_video, status="COMPLETED", error=""):
+    try:
+        renders_base = os.path.dirname(os.path.abspath(job_dir))
+        history_file = os.path.join(renders_base, "renders_history.json")
+        history = []
+        if os.path.exists(history_file):
+            try:
+                with open(history_file, "r", encoding="utf-8") as f:
+                    history = json.load(f)
+            except Exception:
+                history = []
+                
+        size_mb = 0
+        if output_video and os.path.exists(output_video):
+            size_mb = round(os.path.getsize(output_video) / (1024 * 1024), 2)
+            
+        entry = {
+            "jobId": job_id,
+            "timestamp": datetime.now().isoformat(),
+            "audioPath": audio_path,
+            "durationSeconds": round(duration, 2),
+            "scenesCount": total_scenes,
+            "outputVideo": output_video,
+            "sizeMB": size_mb,
+            "status": status,
+            "folder": job_dir,
+            "error": error
+        }
+        
+        history = [h for h in history if h.get("jobId") != job_id]
+        history.insert(0, entry)
+        history = history[:100]
+        
+        with open(history_file, "w", encoding="utf-8") as f:
+            json.dump(history, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"[WARN] Error guardando renders_history.json: {e}", flush=True)
+
+def get_cached_video(query, index=0):
+    clean_q = re.sub(r'[^a-zA-Z0-9]+', '_', query.strip().lower())[:25]
+    q_hash = hashlib.sha256(f"{query.strip().lower()}_{index}".encode()).hexdigest()[:12]
+    cache_path = os.path.join(CACHE_VIDEOS_DIR, f"pexels_{clean_q}_{q_hash}.mp4")
+    if os.path.exists(cache_path) and os.path.getsize(cache_path) > 50000:
+        return cache_path
+    return None
+
+def save_video_to_cache(source_path, query, index=0):
+    if not os.path.exists(source_path) or os.path.getsize(source_path) < 50000:
+        return None
+    clean_q = re.sub(r'[^a-zA-Z0-9]+', '_', query.strip().lower())[:25]
+    q_hash = hashlib.sha256(f"{query.strip().lower()}_{index}".encode()).hexdigest()[:12]
+    cache_path = os.path.join(CACHE_VIDEOS_DIR, f"pexels_{clean_q}_{q_hash}.mp4")
+    try:
+        if not os.path.exists(cache_path):
+            shutil.copyfile(source_path, cache_path)
+        return cache_path
+    except Exception as e:
+        print(f"[WARN] Error guardando en caché de video: {e}", flush=True)
+        return None
+
+def get_cached_image(prompt, width=1280, height=720):
+    clean_p = re.sub(r'[^a-zA-Z0-9]+', '_', prompt.strip().lower())[:25]
+    p_hash = hashlib.sha256(f"{prompt.strip().lower()}_{width}x{height}".encode()).hexdigest()[:12]
+    cache_path = os.path.join(CACHE_IMAGES_DIR, f"img_{clean_p}_{p_hash}.jpg")
+    if os.path.exists(cache_path) and os.path.getsize(cache_path) > 5000:
+        return cache_path
+    return None
+
+def save_image_to_cache(source_path, prompt, width=1280, height=720):
+    if not os.path.exists(source_path) or os.path.getsize(source_path) < 5000:
+        return None
+    clean_p = re.sub(r'[^a-zA-Z0-9]+', '_', prompt.strip().lower())[:25]
+    p_hash = hashlib.sha256(f"{prompt.strip().lower()}_{width}x{height}".encode()).hexdigest()[:12]
+    cache_path = os.path.join(CACHE_IMAGES_DIR, f"img_{clean_p}_{p_hash}.jpg")
+    try:
+        if not os.path.exists(cache_path):
+            shutil.copyfile(source_path, cache_path)
+        return cache_path
+    except Exception as e:
+        print(f"[WARN] Error guardando en caché de imagen: {e}", flush=True)
+        return None
 
 def run_cmd_silent(cmd, check=False):
     kwargs = {
@@ -53,7 +177,7 @@ def get_audio_duration(audio_path):
             val = res.stdout.decode('utf-8', errors='ignore').strip()
             return float(val)
     except Exception as e:
-        print(f"[WARN] Error midiendo duración de audio: {e}", flush=True)
+        print(f"[WARN] Error midiendo duración de media: {e}", flush=True)
     return 0.0
 
 def update_progress(job_dir, progress, status, details=""):
@@ -69,7 +193,7 @@ def update_progress(job_dir, progress, status, details=""):
             json.dump(data, f)
     except Exception as e:
         print(f"[WARN] Error guardando progreso: {e}", flush=True)
-    print(f"[{progress}%] {status} - {details}", flush=True)
+    log_event(job_dir, f"Progreso {progress}% | {status}: {details}", level=status)
 
 def parse_time(t_str):
     parts = t_str.strip().split(":")
@@ -247,7 +371,6 @@ def search_pexels_video(query, pexels_key=PEXELS_KEY, index=0):
     queries_to_try = [q_clean] if q_clean != query else []
     queries_to_try.append(query)
     
-    # English keywords if Spanish beach terms detected
     if any(w in query.lower() for w in ["playa", "veracruz", "boca del rio", "mar", "costa"]):
         queries_to_try.append("beach ocean waves drone")
         queries_to_try.append("tropical coast sunset")
@@ -287,7 +410,6 @@ def search_pexels_video(query, pexels_key=PEXELS_KEY, index=0):
     if not candidates:
         return None
 
-    # Pick candidate according to index to ensure variety across scenes
     v = candidates[index % len(candidates)]
     mp4_files = [f for f in v.get("video_files", []) if f.get("file_type") == "video/mp4"]
     hd_1080 = [f for f in mp4_files if f.get("width") == 1920 and f.get("height") == 1080]
@@ -401,35 +523,44 @@ def compile_videoclip(config_path, custom_output_dir=None):
     mode = config.get("mode", "full_motion")
     output_filename = config.get("outputFilename", "final_videoclip.mp4")
     
+    # Encabezado de Bitácora
+    log_event(job_dir, "=" * 80)
+    log_event(job_dir, "ARKAIOS DYNAMIC SCENARIO STUDIO — BITÁCORA DE COMPILACIÓN CINEMATOGRÁFICA")
+    log_event(job_dir, f"ID de Trabajo: {job_id} | Modo: {mode} | Aspect Ratio: {aspect_ratio} ({width}x{height})")
+    log_event(job_dir, f"Carpeta de render: {job_dir}")
+    log_event(job_dir, f"Caché de video global: {CACHE_VIDEOS_DIR}")
+    log_event(job_dir, "=" * 80)
+    
     update_progress(job_dir, 3, "INITIALIZING", "Iniciando compilador cinematográfico ARKAIOS...")
     
     # 0. Medir duración exacta del audio maestro con ffprobe
     audio_duration = get_audio_duration(audio_path)
     target_video_duration = audio_duration if audio_duration > 0 else 180.0
-    print(f"[ARKAIOS COMPILER] Pista: {audio_path} | Duración: {target_video_duration:.2f}s", flush=True)
+    log_event(job_dir, f"[AUDIO MASTER] Pista: {audio_path} | Duración: {target_video_duration:.2f}s")
 
     # 1. Expandir o ajustar escenas inteligentemente
     current_scenes_duration = sum(float(sc.get("duration", 10.0)) for sc in raw_scenes)
     
-    # Si el usuario mandó pocas escenas (<= 3) o la duración total no cubre la canción (ej: 1 sola línea de prompt general)
     if len(raw_scenes) <= 3 or current_scenes_duration < (target_video_duration * 0.75):
         base_theme = "cinematic coastal landscape"
         if raw_scenes:
             base_theme = raw_scenes[0].get("query") or raw_scenes[0].get("prompt") or base_theme
         scenes = expand_theme_to_scenes(base_theme, target_video_duration, target_scene_duration=10.5)
-        print(f"[ARKAIOS COMPILER] Tema expandido a {len(scenes)} tomas para cubrir {target_video_duration:.2f}s", flush=True)
+        log_event(job_dir, f"[STORYBOARD] Concepto temático '{base_theme}' expandido a {len(scenes)} tomas para cubrir {target_video_duration:.2f}s")
     else:
         scenes = raw_scenes
-        # Si las escenas no cubren la duración del audio, escalar proporcionalmente
         if current_scenes_duration < target_video_duration:
             scale_factor = target_video_duration / current_scenes_duration
             for sc in scenes:
                 sc["duration"] = round(float(sc.get("duration", 10.0)) * scale_factor, 2)
+            log_event(job_dir, f"[STORYBOARD] Duraciones de tomas escaladas x{scale_factor:.2f} para cubrir pista completa.")
 
     total_scenes = len(scenes)
     if total_scenes == 0:
-        update_progress(job_dir, -1, "ERROR", "No se proporcionaron escenas para renderizar.")
-        return {"success": False, "error": "No scenes"}
+        err = "No se proporcionaron escenas para renderizar."
+        update_progress(job_dir, -1, "ERROR", err)
+        record_render_history(job_id, job_dir, audio_path, 0, 0, "", status="ERROR", error=err)
+        return {"success": False, "error": err}
 
     # 2. Crear subtítulos ASS (si aplica)
     sub_file = os.path.join(job_dir, "subtitles.ass")
@@ -437,11 +568,15 @@ def compile_videoclip(config_path, custom_output_dir=None):
         ass_content = parse_lrc_to_ass(subtitles_text, width=width, height=height)
         with open(sub_file, "w", encoding="utf-8") as f:
             f.write(ass_content)
+        log_event(job_dir, f"[SUBTITLES] Archivo de subtítulos cinemáticos generado: {sub_file}")
     
-    # 3. Renderizar cada Escena
+    # 3. Renderizar cada Escena (con Checkpointing y Caché Global)
     clips = []
+    checkpoint_hits = 0
+    cache_hits = 0
+    
     for idx, sc in enumerate(scenes):
-        sc_id = sc.get("id", f"scn_{idx+1}")
+        sc_id = sc.get("id", f"scn_{idx+1:02d}")
         duration = float(sc.get("duration", 10.0))
         query = sc.get("query") or sc.get("prompt") or sc.get("description", "cinematic atmosphere")
         use_motion = sc.get("motion", True) if mode == "full_motion" else sc.get("motion", False)
@@ -449,55 +584,84 @@ def compile_videoclip(config_path, custom_output_dir=None):
         clip_path = os.path.join(job_dir, f"{sc_id}.mp4")
         raw_clip_path = os.path.join(job_dir, f"{sc_id}_raw.mp4")
         
+        # --- CHECKPOINT: Reanudación si ya se había compilado esta escena en una ejecución interrumpida ---
+        if os.path.exists(clip_path) and os.path.getsize(clip_path) > 50000:
+            existing_dur = get_audio_duration(clip_path)
+            if existing_dur >= (duration * 0.7):
+                checkpoint_hits += 1
+                log_event(job_dir, f"[CHECKPOINT RESUME] Toma #{idx+1}/{total_scenes} ({sc_id}) ya compilada ({existing_dur:.1f}s). Reutilizando clip existente.")
+                clips.append(clip_path)
+                percent = int(5 + (idx / total_scenes) * 70)
+                update_progress(job_dir, percent, "GENERATING_SCENE", f"Toma #{idx+1}/{total_scenes} recuperada de checkpoint ({existing_dur:.1f}s)...")
+                continue
+
         percent = int(5 + (idx / total_scenes) * 70)
         update_progress(job_dir, percent, "GENERATING_SCENE", f"Toma #{idx+1}/{total_scenes} ({duration:.1f}s): {query[:45]}...")
         
         scene_rendered = False
         
-        # Modo Full Motion (Video Real HD de Pexels)
+        # Modo Full Motion (Video Real HD de Pexels con Caché Global)
         if use_motion:
+            # Revisar si el video crudo ya está descargado o en la caché global
             if not os.path.exists(raw_clip_path) or os.path.getsize(raw_clip_path) < 50000:
-                v_url = search_pexels_video(query, index=idx)
-                if not v_url:
-                    v_url = search_pexels_video("cinematic ocean landscape", index=idx)
-                if v_url:
-                    download_video_clip(v_url, raw_clip_path)
+                cached_v = get_cached_video(query, index=idx)
+                if cached_v:
+                    shutil.copyfile(cached_v, raw_clip_path)
+                    cache_hits += 1
+                    log_event(job_dir, f"[CACHE HIT] Video de Pexels recuperado de la caché global: {os.path.basename(cached_v)}")
+                else:
+                    v_url = search_pexels_video(query, index=idx)
+                    if not v_url:
+                        v_url = search_pexels_video("cinematic ocean landscape", index=idx)
+                    if v_url:
+                        if download_video_clip(v_url, raw_clip_path):
+                            save_video_to_cache(raw_clip_path, query, index=idx)
+                            log_event(job_dir, f"[CACHE STORE] Video de Pexels guardado en caché global.")
             
             if os.path.exists(raw_clip_path) and os.path.getsize(raw_clip_path) > 50000:
-                # Normalizar con -stream_loop -1 para que la toma dure exactamente 'duration'
+                log_event(job_dir, f"[FFMPEG] Normalizando toma #{idx+1} ({duration}s) a 1080p con loop seguro...")
                 scene_rendered = normalize_video_clip(FFMPEG_PATH, raw_clip_path, clip_path, duration, width, height)
         
-        # Fallback a Ken Burns con Imagen si no hubo video o el usuario solicitó modo imagen
+        # Fallback a Ken Burns con Imagen (con Caché Global)
         if not scene_rendered:
             img_path = os.path.join(job_dir, f"{sc_id}.jpg")
-            local_img = sc.get("imageUrl")
-            if local_img and os.path.exists(local_img):
-                if os.path.abspath(local_img) != os.path.abspath(img_path):
-                    shutil.copyfile(local_img, img_path)
+            cached_img = get_cached_image(query, width=img_w, height=img_h)
+            if cached_img:
+                shutil.copyfile(cached_img, img_path)
+                cache_hits += 1
+                log_event(job_dir, f"[CACHE HIT] Imagen recuperada de la caché global.")
             else:
                 download_image(query, img_path, width=img_w, height=img_h)
+                save_image_to_cache(img_path, query, width=img_w, height=img_h)
+                log_event(job_dir, f"[CACHE STORE] Imagen guardada en caché global.")
+                
             zoom_dir = sc.get("zoom_dir", "in" if idx % 2 == 0 else "out")
+            log_event(job_dir, f"[FFMPEG] Renderizando imagen Ken Burns (zoom {zoom_dir}) duración {duration}s...")
             scene_rendered = render_scene_image(FFMPEG_PATH, img_path, clip_path, duration, zoom_dir, width, height)
             
         if scene_rendered and os.path.exists(clip_path):
             clips.append(clip_path)
+            log_event(job_dir, f"[SCENE SUCCESS] Toma #{idx+1}/{total_scenes} completada ({duration}s).")
         else:
-            print(f"[WARN] Error renderizando escena {sc_id}", flush=True)
+            log_event(job_dir, f"[WARN] Error renderizando escena {sc_id}", level="WARN")
             
     if not clips:
-        update_progress(job_dir, -1, "ERROR", "Ninguna escena cinematográfica pudo ser renderizada.")
-        return {"success": False, "error": "No clips rendered"}
+        err = "Ninguna escena cinematográfica pudo ser renderizada."
+        update_progress(job_dir, -1, "ERROR", err)
+        record_render_history(job_id, job_dir, audio_path, 0, 0, "", status="ERROR", error=err)
+        return {"success": False, "error": err}
         
+    log_event(job_dir, f"[RESUME STATS] Checkpoints reanudados: {checkpoint_hits} | Elementos de caché reutilizados: {cache_hits}")
+
     # 4. Concatenar tomas cinematográficas
     update_progress(job_dir, 78, "CONCATENATING", "Uniendo tomas cinematográficas en Full HD...")
     concat_list = os.path.join(job_dir, "concat.txt")
     
-    # Asegurar que el video concatenado dure >= audio_duration para que el mux corte perfecto con -shortest
     total_rendered_duration = sum(float(sc.get("duration", 10.0)) for sc in scenes[:len(clips)])
     reps = 1
     if target_video_duration > 0 and total_rendered_duration > 0 and total_rendered_duration < target_video_duration:
         reps = int(math.ceil(target_video_duration / total_rendered_duration))
-        print(f"[ARKAIOS COMPILER] Ajustando ciclo de tomas x{reps} para cubrir 100% de la pista de audio", flush=True)
+        log_event(job_dir, f"[CONCAT] Ciclando tomas x{reps} para cubrir duración total del audio ({target_video_duration:.2f}s).")
 
     with open(concat_list, "w", encoding="utf-8") as f:
         for _ in range(reps):
@@ -514,6 +678,7 @@ def compile_videoclip(config_path, custom_output_dir=None):
         merged_raw
     ]
     run_cmd_silent(cmd_concat, check=True)
+    log_event(job_dir, f"[CONCAT] Tomas concatenadas en: {merged_raw}")
     
     # 5. Mux de Audio Maestro y Render Final
     update_progress(job_dir, 90, "FINALIZING", "Sincronizando pista de audio maestro y renderizando videoclip final...")
@@ -530,7 +695,6 @@ def compile_videoclip(config_path, custom_output_dir=None):
         cmd_final.extend(["-vf", f"ass='{safe_ass}'"])
         
     if has_audio:
-        # -shortest asegura que el video se corte en el último milisegundo de la canción
         cmd_final.extend(["-map", "0:v:0", "-map", "1:a:0", "-c:a", "aac", "-b:a", "320k", "-shortest"])
         
     cmd_final.extend([
@@ -543,16 +707,23 @@ def compile_videoclip(config_path, custom_output_dir=None):
     
     res = run_cmd_silent(cmd_final)
     if res.returncode == 0:
-        update_progress(job_dir, 100, "COMPLETED", f"Videoclip oficial generado exitosamente: {output_video}")
+        v_size_mb = round(os.path.getsize(output_video) / (1024 * 1024), 2)
+        log_event(job_dir, f"[COMPLETED] Videoclip final generado exitosamente: {output_video} ({v_size_mb} MB)")
+        log_event(job_dir, "=" * 80)
+        update_progress(job_dir, 100, "COMPLETED", f"Videoclip oficial generado exitosamente ({v_size_mb} MB)")
+        record_render_history(job_id, job_dir, audio_path, target_video_duration, total_scenes, output_video, status="COMPLETED")
         return {
             "success": True,
             "outputVideo": output_video,
             "duration": target_video_duration,
-            "jobDir": job_dir
+            "jobDir": job_dir,
+            "logFile": os.path.join(job_dir, "job.log")
         }
     else:
         err_msg = res.stderr.decode('utf-8', errors='ignore')[-300:]
+        log_event(job_dir, f"[ERROR FFMPEG] {err_msg}", level="ERROR")
         update_progress(job_dir, -1, "ERROR", err_msg)
+        record_render_history(job_id, job_dir, audio_path, target_video_duration, total_scenes, output_video, status="ERROR", error=err_msg)
         return {
             "success": False,
             "error": err_msg

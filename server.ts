@@ -413,16 +413,20 @@ app.get("/api/videoclip/download/:jobId", (req, res) => {
   }
 });
 
-// Endpoint para abrir directamente el Explorador de Windows en la carpeta del video
+// Endpoint para abrir directamente el Explorador de Windows en la carpeta del video o abrir la bitácora
 app.post("/api/videoclip/open-folder", (req, res) => {
   try {
-    const { jobId, folderPath } = req.body;
+    const { jobId, folderPath, selectFile } = req.body;
     const targetFolder = folderPath || (jobId ? path.join(rendersDir, jobId) : rendersDir);
     if (fs.existsSync(targetFolder)) {
       if (process.platform === "win32") {
-        const filePath = path.join(targetFolder, "final_videoclip.mp4");
-        if (fs.existsSync(filePath)) {
-          spawn("explorer.exe", [`/select,${filePath}`], { detached: true, stdio: "ignore", windowsHide: true });
+        const targetFile = selectFile ? path.join(targetFolder, selectFile) : path.join(targetFolder, "final_videoclip.mp4");
+        if (fs.existsSync(targetFile)) {
+          if (selectFile && (selectFile.endsWith(".log") || selectFile.endsWith(".txt"))) {
+            spawn("cmd.exe", ["/c", "start", "", targetFile], { detached: true, stdio: "ignore", windowsHide: true });
+          } else {
+            spawn("explorer.exe", [`/select,${targetFile}`], { detached: true, stdio: "ignore", windowsHide: true });
+          }
         } else {
           spawn("explorer.exe", [targetFolder], { detached: true, stdio: "ignore", windowsHide: true });
         }
@@ -530,6 +534,112 @@ app.post("/api/videoclip/clean", (req, res) => {
       }
     });
     res.json({ ok: true, cleaned, remaining: folders.length - cleaned });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint para obtener la bitácora .log de un trabajo de render
+app.get("/api/videoclip/logs/:jobId", (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const jDir = path.join(rendersDir, jobId);
+    const logFile = path.join(jDir, "job.log");
+    const arkaiosLog = path.join(jDir, "ARKAIOS_RENDER.log");
+    
+    let content = "";
+    if (fs.existsSync(logFile)) {
+      content = fs.readFileSync(logFile, "utf-8");
+    } else if (fs.existsSync(arkaiosLog)) {
+      content = fs.readFileSync(arkaiosLog, "utf-8");
+    } else {
+      return res.status(404).json({ error: "Bitácora no encontrada para este trabajo." });
+    }
+    
+    if (req.query.format === "text") {
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      return res.send(content);
+    }
+    
+    res.json({
+      ok: true,
+      jobId,
+      lines: content.split("\n").filter(Boolean),
+      raw: content
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint para obtener el historial completo acumulado de renders
+app.get("/api/videoclip/history", (req, res) => {
+  try {
+    const historyFile = path.join(rendersDir, "renders_history.json");
+    let history = [];
+    if (fs.existsSync(historyFile)) {
+      try {
+        history = JSON.parse(fs.readFileSync(historyFile, "utf-8"));
+      } catch {}
+    }
+    res.json({ ok: true, history });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint para consultar estadísticas de caché de videos e imágenes
+app.get("/api/videoclip/cache/stats", (req, res) => {
+  try {
+    const cacheDir = path.join(process.cwd(), "public", "cache");
+    const vDir = path.join(cacheDir, "videos");
+    const iDir = path.join(cacheDir, "images");
+    
+    const countFiles = (dir: string) => {
+      if (!fs.existsSync(dir)) return { count: 0, sizeMB: 0 };
+      const files = fs.readdirSync(dir);
+      let totalBytes = 0;
+      files.forEach(f => {
+        try { totalBytes += fs.statSync(path.join(dir, f)).size; } catch {}
+      });
+      return { count: files.length, sizeMB: Math.round((totalBytes / (1024 * 1024)) * 10) / 10 };
+    };
+    
+    const videos = countFiles(vDir);
+    const images = countFiles(iDir);
+    
+    res.json({
+      ok: true,
+      cacheDir,
+      videos,
+      images,
+      totalMB: Math.round((videos.sizeMB + images.sizeMB) * 10) / 10
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Endpoint para limpiar la caché global
+app.post("/api/videoclip/cache/clear", (req, res) => {
+  try {
+    const cacheDir = path.join(process.cwd(), "public", "cache");
+    const vDir = path.join(cacheDir, "videos");
+    const iDir = path.join(cacheDir, "images");
+    
+    let deleted = 0;
+    [vDir, iDir].forEach(d => {
+      if (fs.existsSync(d)) {
+        fs.readdirSync(d).forEach(f => {
+          try {
+            fs.unlinkSync(path.join(d, f));
+            deleted++;
+          } catch {}
+        });
+      }
+    });
+    
+    res.json({ ok: true, message: "Caché global vaciada exitosamente", deleted });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
