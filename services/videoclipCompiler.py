@@ -3,6 +3,7 @@ import sys
 import json
 import time
 import re
+import math
 import shutil
 import urllib.request
 import urllib.parse
@@ -15,7 +16,11 @@ except Exception:
     pass
 
 FFMPEG_PATH = os.environ.get("FFMPEG_PATH") or shutil.which("ffmpeg") or r"C:\ARKAIOS\ShortGPT\ffmpeg-2026-08-17-git-426841da9d-full_build\bin\ffmpeg.exe"
+FFPROBE_PATH = os.environ.get("FFPROBE_PATH") or shutil.which("ffprobe") or (
+    FFMPEG_PATH.replace("ffmpeg.exe", "ffprobe.exe") if "ffmpeg.exe" in FFMPEG_PATH else "ffprobe"
+)
 PEXELS_KEY = os.environ.get("PEXELS_API_KEY") or "4vj6qTzLM9oc0gN7bdgr3vCO7jRDIBe0zJgknfq9geibx9hdQ16TVxpz"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
 
 def run_cmd_silent(cmd, check=False):
     kwargs = {
@@ -31,6 +36,25 @@ def run_cmd_silent(cmd, check=False):
     if check:
         return subprocess.run(cmd, check=True, **kwargs)
     return subprocess.run(cmd, **kwargs)
+
+def get_audio_duration(audio_path):
+    if not audio_path or not os.path.exists(audio_path):
+        return 0.0
+    try:
+        cmd = [
+            FFPROBE_PATH,
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            audio_path
+        ]
+        res = run_cmd_silent(cmd)
+        if res.returncode == 0:
+            val = res.stdout.decode('utf-8', errors='ignore').strip()
+            return float(val)
+    except Exception as e:
+        print(f"[WARN] Error midiendo duración de audio: {e}", flush=True)
+    return 0.0
 
 def update_progress(job_dir, progress, status, details=""):
     progress_file = os.path.join(job_dir, "progress.json")
@@ -128,33 +152,156 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     return header + "\n".join(events) + "\n"
 
-def search_pexels_video(query, pexels_key=PEXELS_KEY):
-    encoded = urllib.parse.quote(query)
-    url = f"https://api.pexels.com/videos/search?query={encoded}&per_page=6&orientation=landscape"
-    req = urllib.request.Request(url, headers={
-        "Authorization": pexels_key,
-        "User-Agent": "Mozilla/5.0 ARKAIOS-Studio"
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            videos = data.get("videos", [])
-            for v in videos:
-                mp4_files = [f for f in v.get("video_files", []) if f.get("file_type") == "video/mp4"]
-                hd_1080 = [f for f in mp4_files if f.get("width") == 1920 and f.get("height") == 1080]
-                if hd_1080:
-                    return hd_1080[0]["link"]
-                hd_any = [f for f in mp4_files if f.get("quality") == "hd"]
-                if hd_any:
-                    return hd_any[0]["link"]
-                if mp4_files:
-                    return mp4_files[0]["link"]
-    except Exception as e:
-        print(f"[WARN BUSCANDO PEXELS] {query}: {e}", flush=True)
+def expand_theme_to_scenes(base_theme, total_duration, target_scene_duration=10.5):
+    theme_lower = base_theme.lower()
+    cleaned = re.sub(r'^(basate en la|haz un video de|video sobre|tema:|escena \d+:?)\s*', '', theme_lower, flags=re.IGNORECASE).strip()
+    if not cleaned:
+        cleaned = "cinematic coastal landscape"
+
+    is_beach = any(w in cleaned for w in ["playa", "beach", "mar", "oceano", "ocean", "costa", "rio", "veracruz", "boca del rio", "arena", "waves"])
+    is_night = any(w in cleaned for w in ["noche", "night", "nocturno", "neon", "oscur", "dark", "jazz"])
+    is_city = any(w in cleaned for w in ["ciudad", "city", "urbano", "urban", "calle", "street", "edificio", "rascacielos"])
+    is_car = any(w in cleaned for w in ["auto", "car", "carretera", "road", "conducir", "drive"])
+
+    if is_beach:
+        shot_keywords = [
+            "drone aerial wide view beach ocean waves",
+            "waves rolling on sandy beach shore sunny day",
+            "tropical palm trees coastal breeze sunny beach",
+            "coastal boardwalk ocean promenade sunny day",
+            "golden hour sunset reflecting over ocean waters",
+            "slow motion ocean tide turquoise water beach",
+            "aerial flight along coastline and sand shore",
+            "waves crashing on sea shore foam splash",
+            "peaceful morning beach tide sunrise light",
+            "boats on the coast calm tropical waters",
+            "cinematic sunset dramatic sky over ocean beach",
+            "coastal road scenic palm trees sunny view",
+            "warm summer sun glittering on sea waves",
+            "dusk sunset horizon orange sky ocean shoreline",
+            "twilight calm waves shore lights reflecting",
+            "nightfall coastal horizon peaceful ocean waves",
+            "tropical sea horizon sunlight reflections",
+            "emerald green ocean water rolling waves",
+            "sandy dunes and coastal sea grass breeze",
+            "cinematic wide panoramic view of ocean beach"
+        ]
+    elif is_night or is_city:
+        shot_keywords = [
+            "aerial drone view metropolis night lights",
+            "neon signs reflections wet city streets night",
+            "traffic light streaks downtown avenue night",
+            "cinematic jazz club lounge warm interior atmosphere",
+            "foggy night skyscrapers skyline lights",
+            "vintage classic car driving empty wet avenue midnight",
+            "bokeh city lights blurred background street night",
+            "saxophone player silhouette warm stage spotlight",
+            "subway train station night aesthetic urban",
+            "coffee shop window rain drops night reflection",
+            "panoramic rooftop view city skyline midnight blue",
+            "street lamp glow dark quiet alleyway cinematic"
+        ]
+    elif is_car:
+        shot_keywords = [
+            "classic vintage car driving along coastal highway",
+            "car windshield view rainy city night lights",
+            "sports car speeding open desert highway sunset",
+            "interior car dashboard evening neon city lights",
+            "aerial drone chasing car winding mountain road",
+            "rear view mirror scenic road golden hour sun",
+            "car headlights illuminating dark country road",
+            "convertible driving along palm tree boulevard"
+        ]
+    else:
+        shot_keywords = [
+            f"cinematic drone aerial view of {cleaned}",
+            f"golden hour warm sunlight on {cleaned}",
+            f"close up dramatic detail of {cleaned}",
+            f"slow motion atmospheric footage of {cleaned}",
+            f"wide angle panoramic shot of {cleaned}",
+            f"sunset horizon glowing light with {cleaned}",
+            f"smooth cinematic tracking camera movement {cleaned}",
+            f"twilight dusk soft ambient lighting {cleaned}",
+            f"crisp high definition 1080p footage of {cleaned}",
+            f"dramatic depth of field bokeh with {cleaned}"
+        ]
+
+    num_scenes = max(1, int(math.ceil(total_duration / target_scene_duration)))
+    dur_per_scene = round(total_duration / num_scenes, 2)
+
+    generated = []
+    for i in range(num_scenes):
+        kw = shot_keywords[i % len(shot_keywords)]
+        generated.append({
+            "id": f"scn_{i+1:02d}",
+            "duration": dur_per_scene,
+            "query": kw,
+            "motion": True
+        })
+    return generated
+
+def search_pexels_video(query, pexels_key=PEXELS_KEY, index=0):
+    q_clean = re.sub(r'^(basate en la|haz un video de|video sobre|tema:|escena \d+:?)\s*', '', query, flags=re.IGNORECASE).strip()
+    
+    candidates = []
+    queries_to_try = [q_clean] if q_clean != query else []
+    queries_to_try.append(query)
+    
+    # English keywords if Spanish beach terms detected
+    if any(w in query.lower() for w in ["playa", "veracruz", "boca del rio", "mar", "costa"]):
+        queries_to_try.append("beach ocean waves drone")
+        queries_to_try.append("tropical coast sunset")
+
+    for try_query in queries_to_try:
+        if not try_query:
+            continue
+        try:
+            encoded = urllib.parse.quote(try_query)
+            url = f"https://api.pexels.com/videos/search?query={encoded}&per_page=20&orientation=landscape"
+            req = urllib.request.Request(url, headers={
+                "Authorization": pexels_key,
+                "User-Agent": USER_AGENT
+            })
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                vlist = data.get("videos", [])
+                if vlist:
+                    candidates.extend(vlist)
+                    break
+        except Exception as e:
+            print(f"[WARN BUSCANDO PEXELS] {try_query}: {e}", flush=True)
+
+    if not candidates:
+        try:
+            url = "https://api.pexels.com/videos/search?query=cinematic+ocean+waves+coast&per_page=20&orientation=landscape"
+            req = urllib.request.Request(url, headers={
+                "Authorization": pexels_key,
+                "User-Agent": USER_AGENT
+            })
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                candidates = data.get("videos", [])
+        except Exception:
+            pass
+
+    if not candidates:
+        return None
+
+    # Pick candidate according to index to ensure variety across scenes
+    v = candidates[index % len(candidates)]
+    mp4_files = [f for f in v.get("video_files", []) if f.get("file_type") == "video/mp4"]
+    hd_1080 = [f for f in mp4_files if f.get("width") == 1920 and f.get("height") == 1080]
+    if hd_1080:
+        return hd_1080[0]["link"]
+    hd_any = [f for f in mp4_files if f.get("quality") == "hd"]
+    if hd_any:
+        return hd_any[0]["link"]
+    if mp4_files:
+        return mp4_files[0]["link"]
     return None
 
 def download_video_clip(url, filepath):
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             with open(filepath, "wb") as f:
@@ -168,6 +315,7 @@ def normalize_video_clip(ffmpeg_bin, raw_path, out_path, target_duration, width=
     vf = f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},fps=30"
     cmd = [
         ffmpeg_bin, "-y",
+        "-stream_loop", "-1",
         "-i", raw_path,
         "-t", str(target_duration),
         "-vf", vf,
@@ -187,7 +335,7 @@ def download_image(prompt, filepath, width=1280, height=720):
     
     encoded_prompt = urllib.parse.quote(prompt)
     url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&nologo=true&seed={int(time.time()*1000)%1000000}"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    headers = {"User-Agent": USER_AGENT}
     
     for attempt in range(2):
         try:
@@ -247,28 +395,51 @@ def compile_videoclip(config_path, custom_output_dir=None):
     width, height = (1080, 1920) if aspect_ratio == "9:16" else (1920, 1080)
     img_w, img_h = (720, 1280) if aspect_ratio == "9:16" else (1280, 720)
     
-    scenes = config.get("scenes", [])
+    raw_scenes = config.get("scenes", [])
     subtitles_text = config.get("subtitlesText", "")
-    disable_subtitles = config.get("disableSubtitles", True)  # Default clean video without subtitles
-    mode = config.get("mode", "full_motion") # Default to full motion real video
+    disable_subtitles = config.get("disableSubtitles", True)
+    mode = config.get("mode", "full_motion")
     output_filename = config.get("outputFilename", "final_videoclip.mp4")
     
-    update_progress(job_dir, 5, "INITIALIZING", "Iniciando compilador cinematográfico ARKAIOS...")
+    update_progress(job_dir, 3, "INITIALIZING", "Iniciando compilador cinematográfico ARKAIOS...")
     
-    # 1. Crear y formatear archivo de subtítulos ASS (si no está deshabilitado)
+    # 0. Medir duración exacta del audio maestro con ffprobe
+    audio_duration = get_audio_duration(audio_path)
+    target_video_duration = audio_duration if audio_duration > 0 else 180.0
+    print(f"[ARKAIOS COMPILER] Pista: {audio_path} | Duración: {target_video_duration:.2f}s", flush=True)
+
+    # 1. Expandir o ajustar escenas inteligentemente
+    current_scenes_duration = sum(float(sc.get("duration", 10.0)) for sc in raw_scenes)
+    
+    # Si el usuario mandó pocas escenas (<= 3) o la duración total no cubre la canción (ej: 1 sola línea de prompt general)
+    if len(raw_scenes) <= 3 or current_scenes_duration < (target_video_duration * 0.75):
+        base_theme = "cinematic coastal landscape"
+        if raw_scenes:
+            base_theme = raw_scenes[0].get("query") or raw_scenes[0].get("prompt") or base_theme
+        scenes = expand_theme_to_scenes(base_theme, target_video_duration, target_scene_duration=10.5)
+        print(f"[ARKAIOS COMPILER] Tema expandido a {len(scenes)} tomas para cubrir {target_video_duration:.2f}s", flush=True)
+    else:
+        scenes = raw_scenes
+        # Si las escenas no cubren la duración del audio, escalar proporcionalmente
+        if current_scenes_duration < target_video_duration:
+            scale_factor = target_video_duration / current_scenes_duration
+            for sc in scenes:
+                sc["duration"] = round(float(sc.get("duration", 10.0)) * scale_factor, 2)
+
+    total_scenes = len(scenes)
+    if total_scenes == 0:
+        update_progress(job_dir, -1, "ERROR", "No se proporcionaron escenas para renderizar.")
+        return {"success": False, "error": "No scenes"}
+
+    # 2. Crear subtítulos ASS (si aplica)
     sub_file = os.path.join(job_dir, "subtitles.ass")
     if not disable_subtitles and subtitles_text.strip():
         ass_content = parse_lrc_to_ass(subtitles_text, width=width, height=height)
         with open(sub_file, "w", encoding="utf-8") as f:
             f.write(ass_content)
     
-    # 2. Generar y Renderizar cada Escena
+    # 3. Renderizar cada Escena
     clips = []
-    total_scenes = len(scenes)
-    if total_scenes == 0:
-        update_progress(job_dir, -1, "ERROR", "No se proporcionaron escenas para renderizar.")
-        return {"success": False, "error": "No scenes"}
-    
     for idx, sc in enumerate(scenes):
         sc_id = sc.get("id", f"scn_{idx+1}")
         duration = float(sc.get("duration", 10.0))
@@ -278,24 +449,25 @@ def compile_videoclip(config_path, custom_output_dir=None):
         clip_path = os.path.join(job_dir, f"{sc_id}.mp4")
         raw_clip_path = os.path.join(job_dir, f"{sc_id}_raw.mp4")
         
-        percent = int(10 + (idx / total_scenes) * 65)
-        update_progress(job_dir, percent, "GENERATING_SCENE", f"Escena #{idx+1}/{total_scenes} ({duration}s): {query[:40]}...")
+        percent = int(5 + (idx / total_scenes) * 70)
+        update_progress(job_dir, percent, "GENERATING_SCENE", f"Toma #{idx+1}/{total_scenes} ({duration:.1f}s): {query[:45]}...")
         
         scene_rendered = False
         
-        # Modo Full Motion (Video Real HD)
+        # Modo Full Motion (Video Real HD de Pexels)
         if use_motion:
             if not os.path.exists(raw_clip_path) or os.path.getsize(raw_clip_path) < 50000:
-                v_url = search_pexels_video(query)
+                v_url = search_pexels_video(query, index=idx)
                 if not v_url:
-                    v_url = search_pexels_video("cinematic night atmosphere")
+                    v_url = search_pexels_video("cinematic ocean landscape", index=idx)
                 if v_url:
                     download_video_clip(v_url, raw_clip_path)
             
             if os.path.exists(raw_clip_path) and os.path.getsize(raw_clip_path) > 50000:
+                # Normalizar con -stream_loop -1 para que la toma dure exactamente 'duration'
                 scene_rendered = normalize_video_clip(FFMPEG_PATH, raw_clip_path, clip_path, duration, width, height)
         
-        # Fallback a Ken Burns con Imagen si no hubo video o el usuario solicitó imagen
+        # Fallback a Ken Burns con Imagen si no hubo video o el usuario solicitó modo imagen
         if not scene_rendered:
             img_path = os.path.join(job_dir, f"{sc_id}.jpg")
             local_img = sc.get("imageUrl")
@@ -313,15 +485,24 @@ def compile_videoclip(config_path, custom_output_dir=None):
             print(f"[WARN] Error renderizando escena {sc_id}", flush=True)
             
     if not clips:
-        update_progress(job_dir, -1, "ERROR", "Ninguna escena pudo ser renderizada.")
+        update_progress(job_dir, -1, "ERROR", "Ninguna escena cinematográfica pudo ser renderizada.")
         return {"success": False, "error": "No clips rendered"}
         
-    # 3. Concatenar tomas
-    update_progress(job_dir, 78, "CONCATENATING", "Uniendo tomas cinematográficas...")
+    # 4. Concatenar tomas cinematográficas
+    update_progress(job_dir, 78, "CONCATENATING", "Uniendo tomas cinematográficas en Full HD...")
     concat_list = os.path.join(job_dir, "concat.txt")
+    
+    # Asegurar que el video concatenado dure >= audio_duration para que el mux corte perfecto con -shortest
+    total_rendered_duration = sum(float(sc.get("duration", 10.0)) for sc in scenes[:len(clips)])
+    reps = 1
+    if target_video_duration > 0 and total_rendered_duration > 0 and total_rendered_duration < target_video_duration:
+        reps = int(math.ceil(target_video_duration / total_rendered_duration))
+        print(f"[ARKAIOS COMPILER] Ajustando ciclo de tomas x{reps} para cubrir 100% de la pista de audio", flush=True)
+
     with open(concat_list, "w", encoding="utf-8") as f:
-        for c in clips:
-            f.write(f"file '{c.replace('\\', '/')}'\n")
+        for _ in range(reps):
+            for c in clips:
+                f.write(f"file '{c.replace('\\', '/')}'\n")
             
     merged_raw = os.path.join(job_dir, "merged_raw.mp4")
     cmd_concat = [
@@ -334,8 +515,8 @@ def compile_videoclip(config_path, custom_output_dir=None):
     ]
     run_cmd_silent(cmd_concat, check=True)
     
-    # 4. Mux de Audio Maestro y Finalización
-    update_progress(job_dir, 90, "FINALIZING", "Sincronizando pista de audio maestro en alta definición...")
+    # 5. Mux de Audio Maestro y Render Final
+    update_progress(job_dir, 90, "FINALIZING", "Sincronizando pista de audio maestro y renderizando videoclip final...")
     output_video = os.path.join(job_dir, output_filename)
     
     cmd_final = [FFMPEG_PATH, "-y", "-i", merged_raw]
@@ -349,12 +530,14 @@ def compile_videoclip(config_path, custom_output_dir=None):
         cmd_final.extend(["-vf", f"ass='{safe_ass}'"])
         
     if has_audio:
+        # -shortest asegura que el video se corte en el último milisegundo de la canción
         cmd_final.extend(["-map", "0:v:0", "-map", "1:a:0", "-c:a", "aac", "-b:a", "320k", "-shortest"])
         
     cmd_final.extend([
         "-c:v", "libx264",
         "-preset", "fast",
         "-crf", "19",
+        "-pix_fmt", "yuv420p",
         output_video
     ])
     
@@ -364,7 +547,7 @@ def compile_videoclip(config_path, custom_output_dir=None):
         return {
             "success": True,
             "outputVideo": output_video,
-            "duration": total_scenes,
+            "duration": target_video_duration,
             "jobDir": job_dir
         }
     else:
